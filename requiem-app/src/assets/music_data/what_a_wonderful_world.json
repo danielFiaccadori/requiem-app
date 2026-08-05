@@ -1,0 +1,16 @@
+{
+  "title": "What a Wonderful World",
+  "artist": "Louis Armstrong",
+  "originalTonality": "F",
+  "normalizedProgression": [
+    "F",
+    "Am",
+    "Bb",
+    "Am",
+    "Gm",
+    "Am",
+    "Bb",
+    "C7",
+    "F"
+  ]
+}

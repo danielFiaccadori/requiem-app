@@ -1,0 +1,16 @@
+{
+  "title": "Ode to Joy",
+  "artist": "Beethoven",
+  "originalTonality": "D",
+  "normalizedProgression": [
+    "D",
+    "A",
+    "D",
+    "G",
+    "D",
+    "A",
+    "D",
+    "A",
+    "D"
+  ]
+}

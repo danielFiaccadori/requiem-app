@@ -1,0 +1,16 @@
+{
+  "title": "Symphony No. 5",
+  "artist": "Beethoven",
+  "originalTonality": "Cm",
+  "normalizedProgression": [
+    "Cm",
+    "G",
+    "Cm",
+    "Ab",
+    "Eb",
+    "Bb",
+    "Cm",
+    "G7",
+    "Cm"
+  ]
+}

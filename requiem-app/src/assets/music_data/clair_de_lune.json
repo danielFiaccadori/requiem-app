@@ -1,0 +1,13 @@
+{
+  "title": "Clair De Lune",
+  "artist": "Debussy",
+  "originalTonality": "Db",
+  "normalizedProgression": [
+    "Db",
+    "Bbm",
+    "Gb",
+    "Db",
+    "Ab",
+    "Db"
+  ]
+}

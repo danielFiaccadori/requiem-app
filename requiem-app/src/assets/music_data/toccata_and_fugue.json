@@ -1,0 +1,17 @@
+{
+  "title": "Toccata and Fugue",
+  "artist": "Bach",
+  "originalTonality": "Dm",
+  "normalizedProgression": [
+    "Dm",
+    "A7",
+    "Dm",
+    "C",
+    "Bb",
+    "A",
+    "Dm",
+    "Gm",
+    "A7",
+    "Dm"
+  ]
+}

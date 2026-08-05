@@ -1,0 +1,12 @@
+{
+  "title": "Everlong",
+  "artist": "Foo Fighters",
+  "originalTonality": "Dmaj7",
+  "normalizedProgression": [
+    "Dmaj7",
+    "Bm",
+    "G",
+    "Bm",
+    "Dmaj7"
+  ]
+}

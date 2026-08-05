@@ -1,0 +1,13 @@
+{
+  "title": "Lord Of The Rings",
+  "artist": "Howard Shore",
+  "originalTonality": "D",
+  "normalizedProgression": [
+    "D",
+    "G",
+    "A",
+    "Bm",
+    "G",
+    "D"
+  ]
+}

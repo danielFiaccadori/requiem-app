@@ -1,0 +1,15 @@
+{
+  "title": "Stairway To Heaven",
+  "artist": "Led Zeppelin",
+  "originalTonality": "Am",
+  "normalizedProgression": [
+    "Am",
+    "G",
+    "F",
+    "G",
+    "Am",
+    "C",
+    "D",
+    "Am"
+  ]
+}

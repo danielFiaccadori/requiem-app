@@ -1,0 +1,11 @@
+{
+  "title": "One More Time",
+  "artist": "Daft Punk",
+  "originalTonality": "F",
+  "normalizedProgression": [
+    "F",
+    "C",
+    "Bb",
+    "F"
+  ]
+}

@@ -1,0 +1,12 @@
+{
+  "title": "Amazing Grace",
+  "artist": "Traditional",
+  "originalTonality": "G",
+  "normalizedProgression": [
+    "G",
+    "C",
+    "G",
+    "D",
+    "G"
+  ]
+}

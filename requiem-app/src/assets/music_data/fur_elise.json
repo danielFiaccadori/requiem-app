@@ -1,0 +1,13 @@
+{
+  "title": "Fur Elise",
+  "artist": "Beethoven",
+  "originalTonality": "Am",
+  "normalizedProgression": [
+    "Am",
+    "E",
+    "Am",
+    "C",
+    "G",
+    "Am"
+  ]
+}

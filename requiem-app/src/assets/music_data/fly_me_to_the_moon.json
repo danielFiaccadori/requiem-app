@@ -1,0 +1,15 @@
+{
+  "title": "Fly Me to the Moon",
+  "artist": "Frank Sinatra",
+  "originalTonality": "C",
+  "normalizedProgression": [
+    "Am",
+    "Dm",
+    "G7",
+    "C",
+    "Am",
+    "Dm",
+    "G7",
+    "Cmaj7"
+  ]
+}

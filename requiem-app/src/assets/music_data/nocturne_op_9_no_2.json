@@ -1,0 +1,18 @@
+{
+  "title": "Nocturne Op. 9 No. 2",
+  "artist": "Chopin",
+  "originalTonality": "Eb",
+  "normalizedProgression": [
+    "Eb",
+    "Cm",
+    "Ab",
+    "Bb",
+    "Eb",
+    "Bb7",
+    "Eb",
+    "Gm",
+    "Ab",
+    "Bb7",
+    "Eb"
+  ]
+}

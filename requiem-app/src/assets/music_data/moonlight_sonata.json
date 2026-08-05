@@ -1,0 +1,15 @@
+{
+  "title": "Moonlight Sonata",
+  "artist": "Beethoven",
+  "originalTonality": "C#m",
+  "normalizedProgression": [
+    "C#m",
+    "G#m",
+    "A",
+    "E",
+    "F#m",
+    "C#m",
+    "G#m",
+    "C#m"
+  ]
+}

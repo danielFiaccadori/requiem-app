@@ -15,7 +15,7 @@ import { apiSaveComposition, apiCreateSession } from "./lib/api";
 
 import { StudioView } from "./components/StudioView";
 import type { AppTab } from "./components/BottomNav";
-import { generateProgression } from "./engine/HarmonyEngine";
+import { generateProgression, warmUpModel } from "./engine/HarmonyEngine";
 import {
   normalizeNotes,
   transposeProgression,
@@ -371,6 +371,9 @@ export default function App() {
     }
   }, [activeBlockId]);
 
+  // Pré-carregar modelo LSTM em background ao montar o app
+  useEffect(() => { warmUpModel(); }, []);
+
   // ── Cleanup ao desmontar ──────────────────────────────
   useEffect(() => {
     return () => {
@@ -515,11 +518,11 @@ export default function App() {
           // Yield antes de consultar a matriz de Markov e iterar no grafo
           await new Promise(resolve => setTimeout(resolve, 50));
 
-          // 6) Gerar progressão via HarmonyEngine (opera em C Major)
-          const rawProgression = generateProgression(
+          // 6) Gerar progressão via HarmonyEngine Neural LSTM (opera em C Major)
+          const rawProgression = await generateProgression(
             normalizedNotes,
             estimatedBpm,
-            preRecordTimeSignature.numerator, // 1 acorde por compasso (duration = numerator)
+            preRecordTimeSignature.numerator, // 1 acorde por compasso
             preRecordTimeSignature.numerator,
             preRecordTimeSignature.denominator,
             "C",

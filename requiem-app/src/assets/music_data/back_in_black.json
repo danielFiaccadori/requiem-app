@@ -1,0 +1,14 @@
+{
+  "title": "Back in Black",
+  "artist": "AC/DC",
+  "originalTonality": "Em",
+  "normalizedProgression": [
+    "E",
+    "D",
+    "A",
+    "E",
+    "D",
+    "A",
+    "E"
+  ]
+}

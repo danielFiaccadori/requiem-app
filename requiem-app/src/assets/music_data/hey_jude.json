@@ -1,0 +1,12 @@
+{
+  "title": "Hey Jude",
+  "artist": "The Beatles",
+  "originalTonality": "F",
+  "normalizedProgression": [
+    "F",
+    "C",
+    "C7",
+    "Bb",
+    "F"
+  ]
+}
