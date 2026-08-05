@@ -1,0 +1,15 @@
+{
+  "title": "Welcome to the Black Parade",
+  "artist": "My Chemical Romance",
+  "originalTonality": "G",
+  "normalizedProgression": [
+    "G",
+    "D",
+    "Em",
+    "Bm",
+    "C",
+    "G",
+    "Am",
+    "D"
+  ]
+}

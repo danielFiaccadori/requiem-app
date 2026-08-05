@@ -1,0 +1,12 @@
+{
+  "title": "Bohemian Rhapsody",
+  "artist": "Queen",
+  "originalTonality": "Bb",
+  "normalizedProgression": [
+    "Bb",
+    "Gm",
+    "Cm",
+    "F",
+    "Bb"
+  ]
+}

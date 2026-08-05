@@ -1,0 +1,12 @@
+{
+  "title": "Shape Of You",
+  "artist": "Ed Sheeran",
+  "originalTonality": "C#m",
+  "normalizedProgression": [
+    "C#m",
+    "F#m",
+    "A",
+    "B",
+    "C#m"
+  ]
+}

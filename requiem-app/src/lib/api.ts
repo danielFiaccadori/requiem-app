@@ -14,9 +14,21 @@ async function apiFetch<T>(path: string, options: RequestInit = {}): Promise<T> 
   if (token) headers['Authorization'] = `Bearer ${token}`;
 
   const res = await fetch(`${BASE_URL}${path}`, { ...options, headers });
-  const data = await res.json();
-  if (!res.ok) throw new Error(data.error || 'Erro na requisição');
-  return data;
+
+  // Lê o body como texto para evitar crash em respostas vazias ou não-JSON
+  const text = await res.text();
+  let data: any = {};
+  if (text) {
+    try {
+      data = JSON.parse(text);
+    } catch {
+      // Resposta não é JSON (ex: HTML de erro do Tomcat)
+      if (!res.ok) throw new Error(`Erro ${res.status}: ${res.statusText}`);
+    }
+  }
+
+  if (!res.ok) throw new Error(data?.error || data?.message || `Erro ${res.status}`);
+  return data as T;
 }
 
 // ── Auth ──────────────────────────────────────────────────

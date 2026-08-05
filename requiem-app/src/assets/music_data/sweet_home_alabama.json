@@ -1,0 +1,11 @@
+{
+  "title": "Sweet Home Alabama",
+  "artist": "Lynyrd Skynyrd",
+  "originalTonality": "D",
+  "normalizedProgression": [
+    "D",
+    "C",
+    "G",
+    "D"
+  ]
+}

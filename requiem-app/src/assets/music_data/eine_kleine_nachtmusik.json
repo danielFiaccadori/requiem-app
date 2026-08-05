@@ -1,0 +1,16 @@
+{
+  "title": "Eine Kleine Nachtmusik",
+  "artist": "Mozart",
+  "originalTonality": "G",
+  "normalizedProgression": [
+    "G",
+    "D",
+    "G",
+    "D7",
+    "G",
+    "C",
+    "G",
+    "D",
+    "G"
+  ]
+}

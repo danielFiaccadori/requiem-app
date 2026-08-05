@@ -1,0 +1,16 @@
+{
+  "title": "Hans Zimmer Test of Time",
+  "artist": "Hans Zimmer",
+  "originalTonality": "Am",
+  "normalizedProgression": [
+    "Am",
+    "G",
+    "F",
+    "E",
+    "Am",
+    "G",
+    "F",
+    "G",
+    "Am"
+  ]
+}

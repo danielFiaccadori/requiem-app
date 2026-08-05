@@ -1,0 +1,16 @@
+{
+  "title": "Wave",
+  "artist": "Tom Jobim",
+  "originalTonality": "D",
+  "normalizedProgression": [
+    "Dmaj7",
+    "G7",
+    "Cmaj7",
+    "F7",
+    "Bm7",
+    "E7",
+    "Am7",
+    "D7",
+    "Gmaj7"
+  ]
+}

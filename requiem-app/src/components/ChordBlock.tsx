@@ -2,8 +2,7 @@ import { useState, useRef, useEffect, useMemo } from "react";
 import { createPortal } from "react-dom";
 import { ShieldCheck, Sparkles, Trash2 } from "lucide-react";
 import { ChordRoll } from "./ChordRoll";
-import { HARMONY_GRAPH, markovModel } from "../engine/HarmonyEngine";
-import { chordToRoman, romanToChord } from "../engine/TonalityAdapter";
+import { HARMONY_GRAPH, getNeuralProbs } from "../engine/HarmonyEngine";
 
 export interface ChordBlockProps {
   chord: string;
@@ -48,7 +47,7 @@ export function ChordBlock({
       updatePosition();
       document.addEventListener("mousedown", handleClickOutside);
       window.addEventListener("resize", updatePosition);
-      window.addEventListener("scroll", updatePosition, true); // capture scroll
+      window.addEventListener("scroll", updatePosition, true);
     }
     return () => {
       document.removeEventListener("mousedown", handleClickOutside);
@@ -59,25 +58,24 @@ export function ChordBlock({
 
   const { mathChords, dataChords } = useMemo(() => {
     const node = HARMONY_GRAPH[prevChord] || HARMONY_GRAPH[tonality] || HARMONY_GRAPH["C"];
-    const transitions = node.allowedTransitions || [];
-    
-    const prevRoman = chordToRoman(prevChord, tonality);
-    // Extrai a base pura caso o acorde atual tenha sufixo cinematográfico
-    const baseRomanMatch = prevRoman.match(/^([b#]?(?:III|iii|II|ii|IV|iv|VIII|viii|VII|vii|VI|vi|V|v|I|i))/);
-    const safePrevRoman = baseRomanMatch ? baseRomanMatch[1] : prevRoman;
-    const probs = markovModel.baseMatrix[safePrevRoman] || {};
-    
-    const dataList = Object.entries(probs)
-      .filter(([r, p]) => p >= 0.05)
-      .map(([r, p]) => ({ chord: romanToChord(r, tonality), prob: p }))
-      .filter(item => item.chord !== chord)
-      .sort((a, b) => b.prob - a.prob);
+    const transitions = Array.from(node.allowedTransitions);
+
+    // Probabilidades neurais do LSTM para o acorde anterior
+    const neuralProbs = getNeuralProbs([prevChord]);
+
+    // "Dataset Patterns" = acordes que o LSTM prefere com prob > 5%
+    const dataList = Array.from(neuralProbs.entries())
+      .filter(([c, p]) => p >= 0.05 && c !== chord && c in HARMONY_GRAPH)
+      .map(([c, p]) => ({ chord: c, prob: p }))
+      .sort((a, b) => b.prob - a.prob)
+      .slice(0, 8);
 
     const dataSet = new Set(dataList.map(x => x.chord));
+    // "Alternativas Teóricas" = transições do grafo não cobertas pelo neural
     const mathList = transitions.filter(c => c !== chord && !dataSet.has(c));
 
     return { mathChords: mathList, dataChords: dataList };
-  }, [chord, prevChord]);
+  }, [chord, prevChord, tonality]);
 
   const toggleMenu = (e: React.MouseEvent) => {
     e.stopPropagation();
@@ -157,11 +155,11 @@ export function ChordBlock({
               </div>
             )}
 
-            {/* Section 2: Dataset (✨) */}
+            {/* Section 2: Neural Model (✨) */}
             {dataChords.length > 0 && (
               <div className="p-2 bg-zinc-950/20 mt-1">
                 <div className="text-[10px] font-mono text-white/80 uppercase tracking-widest px-2 pb-1.5 mb-1 flex items-center gap-1.5">
-                  <Sparkles size={12} /> Dataset Patterns
+                  <Sparkles size={12} /> Neural Patterns
                 </div>
                 <div className="mt-1">
                   {dataChords.map((s, i) => (
@@ -175,7 +173,7 @@ export function ChordBlock({
                           ✨ {s.chord}
                         </span>
                       </div>
-                      <span className="text-[10px] text-white/40 font-mono">{(s.prob * 100).toFixed(0)}% peso</span>
+                      <span className="text-[10px] text-white/40 font-mono">{(s.prob * 100).toFixed(0)}% prob</span>
                     </button>
                   ))}
                 </div>

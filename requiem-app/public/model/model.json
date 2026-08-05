@@ -1,0 +1,744 @@
+{
+  "format": "layers-model",
+  "generatedBy": "requiem-export_tfjs.py",
+  "convertedBy": "manual",
+  "modelTopology": {
+    "class_name": "Functional",
+    "config": {
+      "name": "RequiemLSTM",
+      "trainable": true,
+      "layers": [
+        {
+          "module": "keras.layers",
+          "class_name": "InputLayer",
+          "config": {
+            "batch_shape": [
+              null,
+              4
+            ],
+            "dtype": "float32",
+            "sparse": false,
+            "ragged": false,
+            "name": "chord_sequence",
+            "optional": false
+          },
+          "registered_name": null,
+          "name": "chord_sequence",
+          "inbound_nodes": []
+        },
+        {
+          "module": "keras.layers",
+          "class_name": "Embedding",
+          "config": {
+            "name": "chord_embedding",
+            "trainable": true,
+            "dtype": {
+              "module": "keras",
+              "class_name": "DTypePolicy",
+              "config": {
+                "name": "float32"
+              },
+              "registered_name": null
+            },
+            "input_dim": 97,
+            "output_dim": 32,
+            "embeddings_initializer": {
+              "module": "keras.initializers",
+              "class_name": "RandomUniform",
+              "config": {
+                "seed": null,
+                "minval": -0.05,
+                "maxval": 0.05
+              },
+              "registered_name": null
+            },
+            "embeddings_regularizer": null,
+            "activity_regularizer": null,
+            "embeddings_constraint": null,
+            "mask_zero": true,
+            "quantization_config": null
+          },
+          "registered_name": null,
+          "build_config": {
+            "input_shape": [
+              null,
+              4
+            ]
+          },
+          "name": "chord_embedding",
+          "inbound_nodes": [
+            {
+              "args": [
+                {
+                  "class_name": "__keras_tensor__",
+                  "config": {
+                    "shape": [
+                      null,
+                      4
+                    ],
+                    "dtype": "float32",
+                    "keras_history": [
+                      "chord_sequence",
+                      0,
+                      0
+                    ]
+                  }
+                }
+              ],
+              "kwargs": {}
+            }
+          ]
+        },
+        {
+          "module": "keras.src.ops.numpy",
+          "class_name": "NotEqual",
+          "config": {
+            "name": "not_equal"
+          },
+          "registered_name": "NotEqual",
+          "name": "not_equal",
+          "inbound_nodes": [
+            {
+              "args": [
+                {
+                  "class_name": "__keras_tensor__",
+                  "config": {
+                    "shape": [
+                      null,
+                      4
+                    ],
+                    "dtype": "float32",
+                    "keras_history": [
+                      "chord_sequence",
+                      0,
+                      0
+                    ]
+                  }
+                },
+                0
+              ],
+              "kwargs": {}
+            }
+          ]
+        },
+        {
+          "module": "keras.layers",
+          "class_name": "LSTM",
+          "config": {
+            "name": "lstm_layer_1",
+            "trainable": true,
+            "dtype": {
+              "module": "keras",
+              "class_name": "DTypePolicy",
+              "config": {
+                "name": "float32"
+              },
+              "registered_name": null
+            },
+            "return_sequences": true,
+            "return_state": false,
+            "go_backwards": false,
+            "stateful": false,
+            "unroll": false,
+            "zero_output_for_mask": false,
+            "units": 128,
+            "activation": "tanh",
+            "recurrent_activation": "sigmoid",
+            "use_bias": true,
+            "kernel_initializer": {
+              "module": "keras.initializers",
+              "class_name": "GlorotUniform",
+              "config": {
+                "seed": null,
+                "input_axes": null,
+                "output_axes": null
+              },
+              "registered_name": null
+            },
+            "recurrent_initializer": {
+              "module": "keras.initializers",
+              "class_name": "Orthogonal",
+              "config": {
+                "seed": null,
+                "gain": 1.0
+              },
+              "registered_name": null
+            },
+            "bias_initializer": {
+              "module": "keras.initializers",
+              "class_name": "Zeros",
+              "config": {},
+              "registered_name": null
+            },
+            "unit_forget_bias": true,
+            "kernel_regularizer": null,
+            "recurrent_regularizer": null,
+            "bias_regularizer": null,
+            "activity_regularizer": null,
+            "kernel_constraint": null,
+            "recurrent_constraint": null,
+            "bias_constraint": null,
+            "dropout": 0.0,
+            "recurrent_dropout": 0.0,
+            "seed": null
+          },
+          "registered_name": null,
+          "build_config": {
+            "input_shape": [
+              null,
+              4,
+              32
+            ]
+          },
+          "name": "lstm_layer_1",
+          "inbound_nodes": [
+            {
+              "args": [
+                {
+                  "class_name": "__keras_tensor__",
+                  "config": {
+                    "shape": [
+                      null,
+                      4,
+                      32
+                    ],
+                    "dtype": "float32",
+                    "keras_history": [
+                      "chord_embedding",
+                      0,
+                      0
+                    ]
+                  }
+                }
+              ],
+              "kwargs": {
+                "training": false,
+                "mask": {
+                  "class_name": "__keras_tensor__",
+                  "config": {
+                    "shape": [
+                      null,
+                      4
+                    ],
+                    "dtype": "bool",
+                    "keras_history": [
+                      "not_equal",
+                      0,
+                      0
+                    ]
+                  }
+                }
+              }
+            }
+          ]
+        },
+        {
+          "module": "keras.layers",
+          "class_name": "Dropout",
+          "config": {
+            "name": "dropout_1",
+            "trainable": true,
+            "dtype": {
+              "module": "keras",
+              "class_name": "DTypePolicy",
+              "config": {
+                "name": "float32"
+              },
+              "registered_name": null
+            },
+            "rate": 0.3,
+            "seed": null,
+            "noise_shape": null
+          },
+          "registered_name": null,
+          "name": "dropout_1",
+          "inbound_nodes": [
+            {
+              "args": [
+                {
+                  "class_name": "__keras_tensor__",
+                  "config": {
+                    "shape": [
+                      null,
+                      4,
+                      128
+                    ],
+                    "dtype": "float32",
+                    "keras_history": [
+                      "lstm_layer_1",
+                      0,
+                      0
+                    ]
+                  }
+                }
+              ],
+              "kwargs": {
+                "training": false
+              }
+            }
+          ]
+        },
+        {
+          "module": "keras.layers",
+          "class_name": "LSTM",
+          "config": {
+            "name": "lstm_layer_2",
+            "trainable": true,
+            "dtype": {
+              "module": "keras",
+              "class_name": "DTypePolicy",
+              "config": {
+                "name": "float32"
+              },
+              "registered_name": null
+            },
+            "return_sequences": false,
+            "return_state": false,
+            "go_backwards": false,
+            "stateful": false,
+            "unroll": false,
+            "zero_output_for_mask": false,
+            "units": 64,
+            "activation": "tanh",
+            "recurrent_activation": "sigmoid",
+            "use_bias": true,
+            "kernel_initializer": {
+              "module": "keras.initializers",
+              "class_name": "GlorotUniform",
+              "config": {
+                "seed": null,
+                "input_axes": null,
+                "output_axes": null
+              },
+              "registered_name": null
+            },
+            "recurrent_initializer": {
+              "module": "keras.initializers",
+              "class_name": "Orthogonal",
+              "config": {
+                "seed": null,
+                "gain": 1.0
+              },
+              "registered_name": null
+            },
+            "bias_initializer": {
+              "module": "keras.initializers",
+              "class_name": "Zeros",
+              "config": {},
+              "registered_name": null
+            },
+            "unit_forget_bias": true,
+            "kernel_regularizer": null,
+            "recurrent_regularizer": null,
+            "bias_regularizer": null,
+            "activity_regularizer": null,
+            "kernel_constraint": null,
+            "recurrent_constraint": null,
+            "bias_constraint": null,
+            "dropout": 0.0,
+            "recurrent_dropout": 0.0,
+            "seed": null
+          },
+          "registered_name": null,
+          "build_config": {
+            "input_shape": [
+              null,
+              4,
+              128
+            ]
+          },
+          "name": "lstm_layer_2",
+          "inbound_nodes": [
+            {
+              "args": [
+                {
+                  "class_name": "__keras_tensor__",
+                  "config": {
+                    "shape": [
+                      null,
+                      4,
+                      128
+                    ],
+                    "dtype": "float32",
+                    "keras_history": [
+                      "dropout_1",
+                      0,
+                      0
+                    ]
+                  }
+                }
+              ],
+              "kwargs": {
+                "training": false,
+                "mask": {
+                  "class_name": "__keras_tensor__",
+                  "config": {
+                    "shape": [
+                      null,
+                      4
+                    ],
+                    "dtype": "bool",
+                    "keras_history": [
+                      "not_equal",
+                      0,
+                      0
+                    ]
+                  }
+                }
+              }
+            }
+          ]
+        },
+        {
+          "module": "keras.layers",
+          "class_name": "Dropout",
+          "config": {
+            "name": "dropout_2",
+            "trainable": true,
+            "dtype": {
+              "module": "keras",
+              "class_name": "DTypePolicy",
+              "config": {
+                "name": "float32"
+              },
+              "registered_name": null
+            },
+            "rate": 0.3,
+            "seed": null,
+            "noise_shape": null
+          },
+          "registered_name": null,
+          "name": "dropout_2",
+          "inbound_nodes": [
+            {
+              "args": [
+                {
+                  "class_name": "__keras_tensor__",
+                  "config": {
+                    "shape": [
+                      null,
+                      64
+                    ],
+                    "dtype": "float32",
+                    "keras_history": [
+                      "lstm_layer_2",
+                      0,
+                      0
+                    ]
+                  }
+                }
+              ],
+              "kwargs": {
+                "training": false
+              }
+            }
+          ]
+        },
+        {
+          "module": "keras.layers",
+          "class_name": "Dense",
+          "config": {
+            "name": "dense_hidden",
+            "trainable": true,
+            "dtype": {
+              "module": "keras",
+              "class_name": "DTypePolicy",
+              "config": {
+                "name": "float32"
+              },
+              "registered_name": null
+            },
+            "units": 64,
+            "activation": "relu",
+            "use_bias": true,
+            "kernel_initializer": {
+              "module": "keras.initializers",
+              "class_name": "GlorotUniform",
+              "config": {
+                "seed": null,
+                "input_axes": null,
+                "output_axes": null
+              },
+              "registered_name": null
+            },
+            "bias_initializer": {
+              "module": "keras.initializers",
+              "class_name": "Zeros",
+              "config": {},
+              "registered_name": null
+            },
+            "kernel_regularizer": null,
+            "bias_regularizer": null,
+            "kernel_constraint": null,
+            "bias_constraint": null,
+            "quantization_config": null
+          },
+          "registered_name": null,
+          "build_config": {
+            "input_shape": [
+              null,
+              64
+            ]
+          },
+          "name": "dense_hidden",
+          "inbound_nodes": [
+            {
+              "args": [
+                {
+                  "class_name": "__keras_tensor__",
+                  "config": {
+                    "shape": [
+                      null,
+                      64
+                    ],
+                    "dtype": "float32",
+                    "keras_history": [
+                      "dropout_2",
+                      0,
+                      0
+                    ]
+                  }
+                }
+              ],
+              "kwargs": {}
+            }
+          ]
+        },
+        {
+          "module": "keras.layers",
+          "class_name": "Dropout",
+          "config": {
+            "name": "dropout_3",
+            "trainable": true,
+            "dtype": {
+              "module": "keras",
+              "class_name": "DTypePolicy",
+              "config": {
+                "name": "float32"
+              },
+              "registered_name": null
+            },
+            "rate": 0.201,
+            "seed": null,
+            "noise_shape": null
+          },
+          "registered_name": null,
+          "name": "dropout_3",
+          "inbound_nodes": [
+            {
+              "args": [
+                {
+                  "class_name": "__keras_tensor__",
+                  "config": {
+                    "shape": [
+                      null,
+                      64
+                    ],
+                    "dtype": "float32",
+                    "keras_history": [
+                      "dense_hidden",
+                      0,
+                      0
+                    ]
+                  }
+                }
+              ],
+              "kwargs": {
+                "training": false
+              }
+            }
+          ]
+        },
+        {
+          "module": "keras.layers",
+          "class_name": "Dense",
+          "config": {
+            "name": "chord_probabilities",
+            "trainable": true,
+            "dtype": {
+              "module": "keras",
+              "class_name": "DTypePolicy",
+              "config": {
+                "name": "float32"
+              },
+              "registered_name": null
+            },
+            "units": 97,
+            "activation": "softmax",
+            "use_bias": true,
+            "kernel_initializer": {
+              "module": "keras.initializers",
+              "class_name": "GlorotUniform",
+              "config": {
+                "seed": null,
+                "input_axes": null,
+                "output_axes": null
+              },
+              "registered_name": null
+            },
+            "bias_initializer": {
+              "module": "keras.initializers",
+              "class_name": "Zeros",
+              "config": {},
+              "registered_name": null
+            },
+            "kernel_regularizer": null,
+            "bias_regularizer": null,
+            "kernel_constraint": null,
+            "bias_constraint": null,
+            "quantization_config": null
+          },
+          "registered_name": null,
+          "build_config": {
+            "input_shape": [
+              null,
+              64
+            ]
+          },
+          "name": "chord_probabilities",
+          "inbound_nodes": [
+            {
+              "args": [
+                {
+                  "class_name": "__keras_tensor__",
+                  "config": {
+                    "shape": [
+                      null,
+                      64
+                    ],
+                    "dtype": "float32",
+                    "keras_history": [
+                      "dropout_3",
+                      0,
+                      0
+                    ]
+                  }
+                }
+              ],
+              "kwargs": {}
+            }
+          ]
+        }
+      ],
+      "input_layers": [
+        "chord_sequence",
+        0,
+        0
+      ],
+      "output_layers": [
+        "chord_probabilities",
+        0,
+        0
+      ]
+    },
+    "keras_version": "3.15.1",
+    "backend": "tensorflow"
+  },
+  "weightsManifest": [
+    {
+      "paths": [
+        "group1-shard1of1.bin"
+      ],
+      "weights": [
+        {
+          "name": "chord_embedding/embeddings",
+          "shape": [
+            97,
+            32
+          ],
+          "dtype": "float32",
+          "quantization": null
+        },
+        {
+          "name": "lstm_layer_1/kernel",
+          "shape": [
+            32,
+            512
+          ],
+          "dtype": "float32",
+          "quantization": null
+        },
+        {
+          "name": "lstm_layer_1/recurrent_kernel",
+          "shape": [
+            128,
+            512
+          ],
+          "dtype": "float32",
+          "quantization": null
+        },
+        {
+          "name": "lstm_layer_1/bias",
+          "shape": [
+            512
+          ],
+          "dtype": "float32",
+          "quantization": null
+        },
+        {
+          "name": "lstm_layer_2/kernel",
+          "shape": [
+            128,
+            256
+          ],
+          "dtype": "float32",
+          "quantization": null
+        },
+        {
+          "name": "lstm_layer_2/recurrent_kernel",
+          "shape": [
+            64,
+            256
+          ],
+          "dtype": "float32",
+          "quantization": null
+        },
+        {
+          "name": "lstm_layer_2/bias",
+          "shape": [
+            256
+          ],
+          "dtype": "float32",
+          "quantization": null
+        },
+        {
+          "name": "dense_hidden/kernel",
+          "shape": [
+            64,
+            64
+          ],
+          "dtype": "float32",
+          "quantization": null
+        },
+        {
+          "name": "dense_hidden/bias",
+          "shape": [
+            64
+          ],
+          "dtype": "float32",
+          "quantization": null
+        },
+        {
+          "name": "chord_probabilities/kernel",
+          "shape": [
+            64,
+            97
+          ],
+          "dtype": "float32",
+          "quantization": null
+        },
+        {
+          "name": "chord_probabilities/bias",
+          "shape": [
+            97
+          ],
+          "dtype": "float32",
+          "quantization": null
+        }
+      ]
+    }
+  ],
+  "userDefinedMetadata": {
+    "modelName": "RequiemLSTM"
+  }
+}

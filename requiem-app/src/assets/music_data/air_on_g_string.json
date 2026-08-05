@@ -1,0 +1,14 @@
+{
+  "title": "Air On G String",
+  "artist": "Bach",
+  "originalTonality": "D",
+  "normalizedProgression": [
+    "D",
+    "G",
+    "A",
+    "Bm",
+    "E",
+    "A",
+    "D"
+  ]
+}

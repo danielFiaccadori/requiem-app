@@ -1,0 +1,12 @@
+{
+  "title": "Hello Adele",
+  "artist": "Adele",
+  "originalTonality": "Am",
+  "normalizedProgression": [
+    "Am",
+    "C",
+    "G",
+    "F",
+    "Am"
+  ]
+}

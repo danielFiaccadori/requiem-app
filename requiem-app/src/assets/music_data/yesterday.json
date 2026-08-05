@@ -1,0 +1,14 @@
+{
+  "title": "Yesterday",
+  "artist": "The Beatles",
+  "originalTonality": "F",
+  "normalizedProgression": [
+    "F",
+    "Em",
+    "A",
+    "Dm",
+    "Bb",
+    "C",
+    "F"
+  ]
+}
