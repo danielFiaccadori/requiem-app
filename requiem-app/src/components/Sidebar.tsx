@@ -17,7 +17,7 @@ interface SidebarProps {
   onSessionChange: (session: ChatSession | null) => void;
   onSessionRename: (id: string, newTitle: string) => void;
   activeSession?: ChatSession | null;
-  onSearchClick: () => void;
+  onSearchClick?: () => void;
 }
 
 export function Sidebar({
@@ -27,7 +27,7 @@ export function Sidebar({
   onSessionChange,
   onSessionRename,
   activeSession,
-  onSearchClick,
+  onSearchClick = () => {},
 }: SidebarProps) {
   const { user, logout } = useAuth();
   const [sessions, setSessions] = useState<ChatSession[]>([]);

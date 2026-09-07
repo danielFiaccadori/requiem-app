@@ -69,25 +69,25 @@ interface StudioViewProps {
   setPreRecordTimeSignature: (val: TimeSignature) => void;
   onReroll?: () => void;
   // MIDI props
-  midiDevices: MIDIDeviceInfo[];
-  activeMIDIDevice: MIDIDeviceInfo | null;
-  midiReady: boolean;
-  midiError: string | null;
-  onConnectMIDIDevice: (id: string) => void;
-  onDisconnectMIDI: () => void;
-  isMIDIRecording: boolean;
-  onStartMIDIRecording: () => void;
-  onStopMIDIRecording: () => void;
-  selectedTrackIndex: number | null;
+  midiDevices?: MIDIDeviceInfo[];
+  activeMIDIDevice?: MIDIDeviceInfo | null;
+  midiReady?: boolean;
+  midiError?: string | null;
+  onConnectMIDIDevice?: (id: string) => void;
+  onDisconnectMIDI?: () => void;
+  isMIDIRecording?: boolean;
+  onStartMIDIRecording?: () => void;
+  onStopMIDIRecording?: () => void;
+  selectedTrackIndex?: number | null;
   onSelectTrack: (index: number | null) => void;
-  onAddExtraTrack: (type?: 'audio' | 'midi' | 'smart') => void;
-  onRemoveExtraTrack: (index: number) => void;
-  onRenameExtraTrack: (index: number, newName: string) => void;
-  onSetExtraTrackInstrument: (index: number, instrument: InstrumentType) => void;
-  onSetExtraTrackVolume: (index: number, volume: number) => void;
-  onSetExtraTrackMuted: (index: number, muted: boolean) => void;
-  extraTracks: ExtraTrack[];
-  lastMIDIEvent: MIDIEvent | null;
+  onAddExtraTrack?: (type?: 'audio' | 'midi' | 'smart') => void;
+  onRemoveExtraTrack?: (index: number) => void;
+  onRenameExtraTrack?: (index: number, newName: string) => void;
+  onSetExtraTrackInstrument?: (index: number, instrument: InstrumentType) => void;
+  onSetExtraTrackVolume?: (index: number, volume: number) => void;
+  onSetExtraTrackMuted?: (index: number, muted: boolean) => void;
+  extraTracks?: ExtraTrack[];
+  lastMIDIEvent?: MIDIEvent | null;
 }
 
 // ─────────────────────────────────────────────────────────
@@ -142,25 +142,25 @@ export function StudioView({
   setPreRecordTimeSignature,
   onReroll,
   // MIDI
-  midiDevices,
-  activeMIDIDevice,
-  midiReady,
-  midiError,
-  onConnectMIDIDevice,
-  onDisconnectMIDI,
-  isMIDIRecording,
-  onStartMIDIRecording,
-  onStopMIDIRecording,
-  selectedTrackIndex,
+  midiDevices = [],
+  activeMIDIDevice = null,
+  midiReady = false,
+  midiError = null,
+  onConnectMIDIDevice = () => {},
+  onDisconnectMIDI = () => {},
+  isMIDIRecording = false,
+  onStartMIDIRecording = () => {},
+  onStopMIDIRecording = () => {},
+  selectedTrackIndex = null,
   onSelectTrack,
-  onAddExtraTrack,
-  onRemoveExtraTrack,
-  onRenameExtraTrack,
-  onSetExtraTrackInstrument,
-  onSetExtraTrackVolume,
-  onSetExtraTrackMuted,
-  extraTracks,
-  lastMIDIEvent,
+  onAddExtraTrack = () => {},
+  onRemoveExtraTrack = () => {},
+  onRenameExtraTrack = () => {},
+  onSetExtraTrackInstrument = () => {},
+  onSetExtraTrackVolume = () => {},
+  onSetExtraTrackMuted = () => {},
+  extraTracks = [],
+  lastMIDIEvent = null,
 }: StudioViewProps) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const { user } = useAuth();
@@ -528,6 +528,7 @@ export function StudioView({
                         >
                           <ChordBlock
                             chord={chordObj.chord}
+                            left={currentLeft}
                             width={width}
                             tonality={tonality}
                             prevChord={i > 0 ? displayProgression[i - 1].chord : tonality}

@@ -28,9 +28,9 @@ export interface TrackHeadersProps {
   onSetExtraTrackInstrument: (index: number, instrument: InstrumentType) => void;
   onSetExtraTrackVolume: (index: number, volume: number) => void;
   onSetExtraTrackMuted: (index: number, muted: boolean) => void;
-  isMIDIRecording: boolean;
-  midiReady: boolean;
-  lastMIDIEvent: MIDIEvent | null;
+  isMIDIRecording?: boolean;
+  midiReady?: boolean;
+  lastMIDIEvent?: MIDIEvent | null;
 }
 
 const INSTRUMENT_OPTIONS: { value: InstrumentType; label: string; icon: React.ReactNode }[] = [
@@ -189,9 +189,9 @@ export function TrackHeaders({
   onSetExtraTrackInstrument,
   onSetExtraTrackVolume,
   onSetExtraTrackMuted,
-  isMIDIRecording,
-  midiReady,
-  lastMIDIEvent,
+  isMIDIRecording = false,
+  midiReady = false,
+  lastMIDIEvent = null,
 }: TrackHeadersProps) {
   const [editingTrackIndex, setEditingTrackIndex] = useState<number | null>(null);
   const [editingTrackName, setEditingTrackName] = useState("");

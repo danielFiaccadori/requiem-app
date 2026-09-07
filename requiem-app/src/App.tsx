@@ -43,6 +43,16 @@ export interface ChordSegment {
 
 export type InstrumentType = "piano" | "strings" | "pad";
 
+export interface ExtraTrack {
+  id: string;
+  name: string;
+  trackType?: "audio" | "midi" | "smart";
+  instrument: InstrumentType;
+  volume: number;
+  muted: boolean;
+  noteSequence?: INoteSequence;
+}
+
 export interface CompositionBlock {
   id: string;
   name: string;
@@ -260,6 +270,7 @@ export default function App() {
 
   const [melodyInstrument, setMelodyInstrument] = useState<InstrumentType>("piano");
   const [chordsInstrument, setChordsInstrument] = useState<InstrumentType>("piano");
+  const [selectedTrackIndex, setSelectedTrackIndex] = useState<number | null>(null);
   
   const [melodyVolume, setMelodyVolume] = useState(1);
   const [melodyMuted, setMelodyMuted] = useState(false);
@@ -296,14 +307,15 @@ export default function App() {
         id: b.id,
         name: b.name,
         notes: b.notes as DetectedNote[],
-        progression: b.progression,
+        progression: b.progression.map(segment => ({ ...segment, velocity: 0.7 })),
         key: b.key,
         bpm: b.bpm,
         timeSignature: b.timeSignature,
         noteSequence: b.notes.length > 0 ? (() => {
           try {
+            const restoredProgression = b.progression.map(segment => ({ ...segment, velocity: 0.7 }));
             return progressionToNoteSequence(
-              b.progression,
+              restoredProgression,
               b.notes as DetectedNote[],
               b.bpm,
               parseInt(b.timeSignature.split('/')[1] || '4')
@@ -844,6 +856,7 @@ export default function App() {
         onSessionChange={handleSessionChange}
         onSessionRename={handleSessionRename}
         activeSession={activeSession}
+        onSearchClick={() => setActiveTab("vibe")}
       />
 
       {/* ─── VIBE VIEW ─── */}
@@ -967,6 +980,8 @@ export default function App() {
             onUpdateProgression={handleUpdateProgression}
             onStartRecording={handleStartRecording}
             onReorderBlocks={setBlocks}
+            selectedTrackIndex={selectedTrackIndex}
+            onSelectTrack={setSelectedTrackIndex}
             onPlayArrangement={() => stringEngine.playFullArrangement(blocks, melodyInstrument, chordsInstrument)}
             melodyInstrument={melodyInstrument}
             setMelodyInstrument={setMelodyInstrument}
