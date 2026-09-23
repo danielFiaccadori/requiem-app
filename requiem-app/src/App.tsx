@@ -15,7 +15,7 @@ import { apiSaveComposition, apiCreateSession } from "./lib/api";
 
 import { StudioView } from "./components/StudioView";
 import type { AppTab } from "./components/BottomNav";
-import { generateProgression, warmUpModel } from "./engine/HarmonyEngine";
+import { generateProgression, warmUpModel, determineNextChord } from "./engine/HarmonyEngine";
 import {
   normalizeNotes,
   transposeProgression,
@@ -267,15 +267,17 @@ export default function App() {
   const [preRecordTimeSignature, setPreRecordTimeSignature] = useState({ numerator: 4, denominator: 4 });
   const [preRecordBpm, setPreRecordBpm] = useState<number | "AUTO">("AUTO");
   const [preRecordTonality, setPreRecordTonality] = useState<string>("AUTO");
+  const [preRecordTemperature, setPreRecordTemperature] = useState<number>(0.7);
 
-  const [melodyInstrument, setMelodyInstrument] = useState<InstrumentType>("piano");
-  const [chordsInstrument, setChordsInstrument] = useState<InstrumentType>("piano");
+  const [melodyInstrument, setMelodyInstrument] = useState<InstrumentType | "orchestra">("piano");
+  const [chordsInstrument, setChordsInstrument] = useState<InstrumentType | "orchestra">("orchestra");
   const [selectedTrackIndex, setSelectedTrackIndex] = useState<number | null>(null);
   
   const [melodyVolume, setMelodyVolume] = useState(1);
   const [melodyMuted, setMelodyMuted] = useState(false);
   const [chordsVolume, setChordsVolume] = useState(1);
   const [chordsMuted, setChordsMuted] = useState(false);
+  const [liveChord, setLiveChord] = useState<string>("");
   
   const [blocks, setBlocks] = useState<CompositionBlock[]>([
     { id: "1", name: "Verso 1", notes: [], progression: [], key: "C", bpm: 120, timeSignature: "4/4" }
@@ -286,6 +288,17 @@ export default function App() {
   const [playingIndex, setPlayingIndex] = useState<number | null>(null);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<AppTab>("vibe");
+
+  const stringEngine = useStringEngine();
+  const { 
+    playMIDINote, 
+    playChord, 
+    stopAll, 
+    isReady,
+    loadOrchestraInstrument,
+    unloadOrchestraInstrument,
+    activeOrchestraInstruments
+  } = stringEngine;
 
   // ── Session state ───────────────────────────────────────────────
   const [activeSession, setActiveSession] = useState<ChatSession | null>(null);
@@ -358,8 +371,7 @@ export default function App() {
   }, [appState]);
 
   // ── Hooks personalizados ──────────────────────────────
-  const pitchDetector = usePitchDetector();
-  const stringEngine = useStringEngine();
+    const pitchDetector = usePitchDetector();
 
   // ── Sincronizar Volume/Mute com Engine ────────────────
   useEffect(() => {
@@ -386,11 +398,117 @@ export default function App() {
   // Pré-carregar modelo LSTM em background ao montar o app
   useEffect(() => { warmUpModel(); }, []);
 
+  // ── Acompanhamento ao Vivo (PoC) ──────────────────────
+  const liveChordHistoryRef = useRef<string[]>([]);
+  const lastChordTimeRef = useRef<number>(0);
+  const lastPlayedChordRef = useRef<number[]>([]);
+  const lastPitchClassRef = useRef<string | null>(null);
+  const stableCountRef = useRef<number>(0);
+  const firedForCurrentPitchRef = useRef<boolean>(false);
+  const lastPlayedChordNameRef = useRef<string | null>(null);
+  const chordCooldownRef = useRef<number>(0);
+  const silenceStartRef = useRef<number | null>(null);
+
+  // useEffect apenas para iniciar/parar o polling
+  useEffect(() => {
+    if (appState !== "RECORDING" || !pitchDetector.isListening) {
+      liveChordHistoryRef.current = [];
+      setLiveChord("");
+      stopAll();
+      lastPlayedChordRef.current = [];
+      lastPitchClassRef.current = null;
+      stableCountRef.current = 0;
+      firedForCurrentPitchRef.current = false;
+      lastPlayedChordNameRef.current = null;
+      silenceStartRef.current = null;
+      return;
+    }
+
+    // Polling ativo a cada 100ms — não depende de re-renders do React
+    const interval = setInterval(() => {
+      const noteName = pitchDetector.currentNote;
+      const now = performance.now();
+
+      // ── Silêncio ──
+      if (!noteName || noteName === "") {
+        if (lastPlayedChordNameRef.current) {
+          if (!silenceStartRef.current) {
+            silenceStartRef.current = now;
+          } else if (now - silenceStartRef.current > 500) {
+            stopAll();
+            setLiveChord("");
+            lastPlayedChordNameRef.current = null;
+            lastPitchClassRef.current = null;
+            firedForCurrentPitchRef.current = false;
+            stableCountRef.current = 0;
+            silenceStartRef.current = null;
+          }
+        }
+        return;
+      }
+      silenceStartRef.current = null;
+
+      // Anti-feedback
+      if (now - chordCooldownRef.current < 300) return;
+
+      const pitchClass = noteName.replace(/[0-9-]/g, '');
+      if (!pitchClass) return;
+
+      if (pitchClass === lastPitchClassRef.current) {
+        stableCountRef.current++;
+      } else {
+        lastPitchClassRef.current = pitchClass;
+        stableCountRef.current = 1;
+        firedForCurrentPitchRef.current = false;
+        return;
+      }
+
+      if (firedForCurrentPitchRef.current) return;
+      if (stableCountRef.current < 2) return;
+      if (now - lastChordTimeRef.current < 400) return;
+
+      const NOTE_NAMES = ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"];
+      const midi = NOTE_NAMES.indexOf(pitchClass);
+      if (midi === -1) return;
+      
+      const fakeNote: DetectedNote = { pitch: midi + 60, startTime: 0, endTime: 0.1, amplitude: 0.8 };
+      const result = determineNextChord(liveChordHistoryRef.current, [fakeNote], 0, 0.5, preRecordTemperature);
+      
+      if (result.chord) {
+        if (result.chord === lastPlayedChordNameRef.current) {
+          firedForCurrentPitchRef.current = true;
+          return;
+        }
+
+        firedForCurrentPitchRef.current = true;
+        lastChordTimeRef.current = now;
+        liveChordHistoryRef.current.push(result.chord);
+        if (liveChordHistoryRef.current.length > 8) liveChordHistoryRef.current.shift();
+        
+        setLiveChord(result.chord);
+        lastPlayedChordNameRef.current = result.chord;
+        
+        stopAll();
+        chordCooldownRef.current = now;
+        
+        const pcs = getChordPitchClasses(result.chord);
+        const newPitches = pcs.map(pc => 48 + pc);
+        lastPlayedChordRef.current = newPitches;
+        
+        for (const p of newPitches) {
+          playMIDINote(p, 6, 0.8, chordsInstrument);
+        }
+      }
+    }, 100);
+
+    return () => clearInterval(interval);
+  }, [appState, pitchDetector.isListening]);
+
   // ── Cleanup ao desmontar ──────────────────────────────
   useEffect(() => {
     return () => {
       if (pitchDetector.isListening) pitchDetector.stopListening();
-      stringEngine.stop();
+      stopAll();
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -399,14 +517,14 @@ export default function App() {
   const playSequence = useCallback(async (index: number, seq: INoteSequence, offset: number = 0, melodyInst: InstrumentType = "piano", chordsInst: InstrumentType = "piano") => {
     try {
       if (playingIndexRef.current === index) {
-        stringEngine.stop();
+        stopAll();
         setPlayingIndex(null);
         playingIndexRef.current = null;
         return;
       }
 
       // Parar qualquer som anterior
-      stringEngine.stop();
+      stopAll();
 
       setPlayingIndex(index);
       playingIndexRef.current = index;
@@ -694,7 +812,7 @@ export default function App() {
   const isActive = appState !== "IDLE";
   const isRecording = appState === "RECORDING";
   const isProcessing = appState === "PROCESSING";
-  const isButtonDisabled = isProcessing || !stringEngine.isLoaded;
+  const isButtonDisabled = isProcessing || !isReady;
 
   // Auto-switch to Studio when result is generated
   useEffect(() => {
@@ -874,14 +992,14 @@ export default function App() {
                 <DynamicRing 
                   isActive={isActive} 
                   currentFrequency={pitchDetector.currentFrequency}
-                  currentNote={pitchDetector.currentNote}
+                  currentNote={liveChord || pitchDetector.currentNote}
                   onClick={handleRingClick}
                 />
               </div>
 
               <div className={`w-full flex flex-col items-center transition-all duration-700 ease-[cubic-bezier(0.34,1.56,0.64,1)] ${isActive ? 'opacity-0 h-0 scale-90 pointer-events-none' : 'opacity-100 h-auto scale-100'}`}>
                 <h1 className="text-3xl sm:text-4xl font-normal tracking-tight text-white/90 mb-10 drop-shadow-md">
-                  Olá! O que iremos compor hoje?
+                  Olá! O que vamos tocar hoje?
                 </h1>
 
                 <RecordControls
@@ -899,6 +1017,11 @@ export default function App() {
                   setPreRecordBpm={setPreRecordBpm}
                   preRecordTonality={preRecordTonality}
                   setPreRecordTonality={setPreRecordTonality}
+                  preRecordTemperature={preRecordTemperature}
+                  setPreRecordTemperature={setPreRecordTemperature}
+                  loadOrchestraInstrument={loadOrchestraInstrument}
+                  unloadOrchestraInstrument={unloadOrchestraInstrument}
+                  activeOrchestraInstruments={activeOrchestraInstruments}
                 />
             </div>
             

@@ -87,9 +87,10 @@ export const HARMONY_GRAPH: Readonly<Record<string, ChordNode>> = {
 // ─────────────────────────────────────────────────────────
 
 const WINDOW_SIZE = 4;
-const NEURAL_WEIGHT = 15.0;
-const ACOUSTIC_WEIGHT = 1.0;
-const NEURAL_OVERRIDE_THRESHOLD = 0.10;
+const NEURAL_WEIGHT = 4.5;              // Reduzido (antes 8.0) para equilibrar com o score acústico
+const ACOUSTIC_WEIGHT = 1.0;            // Mantido
+const DEFAULT_TEMPERATURE = 0.1;        // Quase zero para evitar escolhas aleatórias e erráticas
+const NEURAL_OVERRIDE_THRESHOLD = 0.25;
 const WEIGHT_IN_CHORD = 2.0;
 const WEIGHT_ROOT_BONUS = 1.5;
 const WEIGHT_OUT_PENALTY = 0.5;
@@ -213,6 +214,8 @@ interface ModelWeights {
   lstm2W: Float32Array; // (128, 4*64)
   lstm2U: Float32Array; // (64, 4*64)
   lstm2b: Float32Array; // (4*64,)
+  melodyW?: Float32Array; // (12, 16)
+  melodyb?: Float32Array; // (16,)
   dense1W: Float32Array;// (64, 64)
   dense1b: Float32Array;// (64,)
   dense2W: Float32Array;// (64, vocab_size)
@@ -253,6 +256,8 @@ async function ensureModelLoaded(): Promise<void> {
       lstm2W: g("lstm_layer_2", 0),
       lstm2U: g("lstm_layer_2", 1),
       lstm2b: g("lstm_layer_2", 2),
+      melodyW: L["melody_dense"] ? g("melody_dense", 0) : undefined,
+      melodyb: L["melody_dense"] ? g("melody_dense", 1) : undefined,
       dense1W: g("dense_hidden", 0),
       dense1b: g("dense_hidden", 1),
       dense2W: g("chord_probabilities", 0),
@@ -269,7 +274,7 @@ async function ensureModelLoaded(): Promise<void> {
 //  6. Inferência LSTM
 // ─────────────────────────────────────────────────────────
 
-function predict(chordHistory: readonly string[]): Float32Array {
+function predict(chordHistory: readonly string[], melodyChroma?: number[]): Float32Array {
   if (!_weights || _vocab.length === 0) {
     return new Float32Array(_vocab.length || 97).fill(1 / (_vocab.length || 97));
   }
@@ -305,8 +310,20 @@ function predict(chordHistory: readonly string[]): Float32Array {
     [h2, c2] = lstmCell(h1, h2, c2, W.lstm2W, W.lstm2U, W.lstm2b, units1, units2);
   }
 
-  // Dense layers
-  const d1 = relu(dense(h2, W.dense1W, W.dense1b, units2, 64));
+  // Dense layers & Concat
+  let concat = h2;
+  let in_dim = units2;
+  
+  if (W.melodyW && W.melodyb && melodyChroma && melodyChroma.length === 12) {
+    const mChroma = new Float32Array(melodyChroma);
+    const mDense = relu(dense(mChroma, W.melodyW, W.melodyb, 12, 16));
+    concat = new Float32Array(units2 + 16);
+    concat.set(h2, 0);
+    concat.set(mDense, units2);
+    in_dim = units2 + 16;
+  }
+
+  const d1 = relu(dense(concat, W.dense1W, W.dense1b, in_dim, 64));
   const logits = dense(d1, W.dense2W, W.dense2b, 64, vocabSize);
   return softmax(logits);
 }
@@ -349,17 +366,42 @@ function computeNoteScore(
 //  8. determineNextChord (API pública)
 // ─────────────────────────────────────────────────────────
 
+function sampleWithTemperature(candidates: string[], scores: number[], temp: number): string {
+  if (temp <= 0) {
+    let maxI = 0;
+    for (let i = 1; i < scores.length; i++) if (scores[i] > scores[maxI]) maxI = i;
+    return candidates[maxI];
+  }
+  const maxScore = Math.max(...scores);
+  const exps = scores.map(s => Math.exp((s - maxScore) / temp));
+  const sumExps = exps.reduce((a, b) => a + b, 0);
+  let rand = Math.random() * sumExps;
+  for (let i = 0; i < exps.length; i++) {
+    rand -= exps[i];
+    if (rand <= 0) return candidates[i];
+  }
+  return candidates[candidates.length - 1];
+}
+
 export function determineNextChord(
   chordHistory: readonly string[],
   playedNotes: readonly DetectedNote[],
   windowStart: number,
   secondsPerBeat: number,
+  temperature: number = DEFAULT_TEMPERATURE
 ): { chord: string; velocity: number } {
   const currentChord = chordHistory.length > 0 ? chordHistory[chordHistory.length - 1] : "C";
   if (playedNotes.length === 0) return { chord: currentChord, velocity: 0.7 };
 
   const currentNode = HARMONY_GRAPH[currentChord];
-  const neuralProbs = predict(chordHistory);
+  
+  const melodyChroma = new Array(12).fill(0);
+  for (const n of playedNotes) {
+    const pc = Math.round(n.pitch) % 12;
+    melodyChroma[pc] = 1;
+  }
+
+  const neuralProbs = predict(chordHistory, melodyChroma);
 
   const density = playedNotes.length;
   const isHighDensity = density > DENSITY_THRESHOLD;
@@ -370,22 +412,32 @@ export function determineNextChord(
   }
   const avgAmplitude = Math.max(0.2, sumAmp / density);
 
-  let bestChord = currentChord;
-  let bestScore = -Infinity;
+  const candidates: string[] = [];
+  const scores: number[] = [];
 
   for (const candidateName of Object.keys(HARMONY_GRAPH)) {
     const idx = _vocabMap.get(candidateName) ?? -1;
     let neuralProb = idx >= 0 ? neuralProbs[idx] : 0;
+
     const isAllowedGraph = currentNode?.allowedTransitions.includes(candidateName) ?? false;
     const isAllowedNeural = neuralProb > NEURAL_OVERRIDE_THRESHOLD;
+
     if (!isAllowedGraph && !isAllowedNeural) continue;
     if (hasLeap && (candidateName.includes("7") || candidateName.includes("dim"))) neuralProb *= TENSION_BONUS;
+
     const chordNotes = getChordPitchClasses(candidateName);
-    const acousticScore = computeNoteScore(chordNotes, playedNotes, windowStart, secondsPerBeat, isHighDensity, avgAmplitude);
+
+    // CORREÇÃO CRÍTICA: score acústico dividido pela densidade
+    const acousticScoreRaw = computeNoteScore(chordNotes, playedNotes, windowStart, secondsPerBeat, isHighDensity, avgAmplitude);
+    const acousticScore = acousticScoreRaw / Math.max(1, density);
+
     const finalScore = ACOUSTIC_WEIGHT * acousticScore + NEURAL_WEIGHT * neuralProb;
-    if (finalScore > bestScore) { bestScore = finalScore; bestChord = candidateName; }
+
+    candidates.push(candidateName);
+    scores.push(finalScore);
   }
 
+  const bestChord = candidates.length > 0 ? sampleWithTemperature(candidates, scores, temperature) : currentChord;
   return { chord: bestChord, velocity: avgAmplitude };
 }
 

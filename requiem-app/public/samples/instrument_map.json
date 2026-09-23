@@ -1,0 +1,125 @@
+{
+  "bassoon": {
+    "A#0": "PSBassoon_A#0_v2_2.wav",
+    "A#3": "PSBassoon_A#3_v2_1.wav",
+    "A2": "PSBassoon_A2_v2_1.wav",
+    "C3": "PSBassoon_C3_v2_1.wav",
+    "D#2": "PSBassoon_D#2_v2_2.wav",
+    "E2": "PSBassoon_E2_v2_1.wav"
+  },
+  "cellos": {
+    "A2": "CelloEns_pizzT_A2_v1_3.wav",
+    "C1": "CelloEns_pizzT_C1_v1_3.wav",
+    "F2": "CelloEns_pizzT_F2_v1_1.wav",
+    "B3": "CelloEns_susvib_B3_v1_1.wav",
+    "C3": "CelloEns_susvib_C3_v1_1.wav",
+    "E1": "CelloEns_susvib_E1_v1_1.wav"
+  },
+  "contrabass": {
+    "A0": "Sum_JBCtbss_pizz_A0_v2_rr1.wav",
+    "A1": "Sum_JBCtbss_pizz_A1_v2_rr1.wav",
+    "C2": "Sum_JBCtbss_pizz_C2_v2_rr1.wav",
+    "D#2": "Sum_JBCtbss_pizz_D#2_v2_rr1.wav",
+    "E0": "Sum_JBCtbss_pizz_E0_v2_rr1.wav",
+    "E1": "Sum_JBCtbss_pizz_E1_v2_rr1.wav"
+  },
+  "flute": {
+    "A3": "LDFlute_susvib_A3_v1_1.wav",
+    "C3": "LDFlute_susvib_C3_v1_1.wav",
+    "E3": "LDFlute_trillW_E3_v1_1.wav",
+    "G3": "LDFlute_susvib_G3_v1_1.wav",
+    "A4": "LDFlute_trillW_A4_v1_1.wav"
+  },
+  "harp": {
+    "A2": "KSHarp_A2_mf1.wav",
+    "A4": "KSHarp_A4_mf1.wav",
+    "B1": "KSHarp_B1_mf1.wav",
+    "B5": "KSHarp_B5_mf1.wav",
+    "C3": "KSHarp_C3_mf1.wav",
+    "D2": "KSHarp_D2_mf1.wav"
+  },
+  "horn": {
+    "A#2": "SGHorn_sus_A#2_v2_rr1_Sum.wav",
+    "A#3": "SGHorn_sus_A#3_v2_rr1_Sum.wav",
+    "D2": "SGHorn_sus_D2_v2_rr2_Sum.wav",
+    "D3": "SGHorn_sus_D3_v2_rr3_Sum.wav",
+    "F3": "SGHorn_sus_F3_v2_rr1_Sum.wav"
+  },
+  "marimba": {
+    "B2": "Marimba_hit_Outrigger_B2_med_02.wav",
+    "B4": "Marimba_hit_Outrigger_B4_med_02.wav",
+    "C2": "Marimba_hit_Outrigger_C2_med_01.wav",
+    "C4": "Marimba_hit_Outrigger_C4_med_01.wav",
+    "C6": "Marimba_hit_Outrigger_C6_med_02.wav",
+    "F3": "Marimba_hit_Outrigger_F3_med_01.wav"
+  },
+  "percussion": {
+    "C3": "Darbuka_01.wav",
+    "E3": "Snare2_HitSN_v7_rr4_Sum.wav",
+    "G3": "Snare3M_taps_v4_rr4_Sum.wav",
+    "C4": "brake_mf_1.wav",
+    "E4": "susCymb1_bow_16.wav",
+    "G4": "susCymb2_hit_stick_pp2.wav"
+  },
+  "timpani": {
+    "C3": "Timpani1_Hit_v3_rr4_Sum.wav",
+    "E3": "Timpani1_Roll_v3_rr1_Sum.wav",
+    "G3": "Timpani2_Roll_v3_rr1_Sum.wav",
+    "C4": "Timpani3_Hit_v3_rr5_Sum.wav",
+    "E4": "Timpani4_Hit_v3_rr4_Sum.wav",
+    "G4": "Timpani4_Roll_v3_rr1_Sum.wav"
+  },
+  "trombone": {
+    "A#1": "7TbnEns_sus_A#1_v3_rr1_Sum.wav",
+    "A#3": "7TbnEns_sus_A#3_v3_rr1_Sum.wav",
+    "F2": "7TbnEns_stac_F2_v3_rr3_Sum.wav",
+    "F#1": "7TbnEns_sus_F#1_v3_rr1_Sum.wav"
+  },
+  "trumpet": {
+    "A#3": "Sum_SHTrumpet_sus_A#3_v2_rr1.wav",
+    "C3": "Sum_SHTrumpet_sus_C3_v2_rr2.wav",
+    "C5": "Sum_SHTrumpet_sus_C5_v1_rr2.wav",
+    "D4": "Sum_SHTrumpet_sus_D4_v2_rr1.wav",
+    "F2": "Sum_SHTrumpet_sus_F2_v2_rr2.wav",
+    "F4": "Sum_SHTrumpet_sus_F4_v2_rr2.wav"
+  },
+  "tuba": {
+    "A#0": "Tuba3_stac_A#0_rr3_Mid.wav",
+    "A#1": "Tuba3_sfz_A#1_rr2_Mid.wav",
+    "A#2": "Tuba3_stac_A#2_rr6_Mid.wav",
+    "D2": "Tuba3_stac_D2_rr5_Mid.wav",
+    "F1": "Tuba3_stac_F1_rr4_Mid.wav"
+  },
+  "tubular_bells": {
+    "A4": "TB_hit_A4_v2_1.wav",
+    "C4": "TB_hit_C4_v2_2.wav",
+    "C5": "TB_hit_C5_v3_1.wav",
+    "E4": "TB_hit_E4_v2_2.wav",
+    "E5": "TB_hit_E5_v2_2.wav",
+    "G4": "TB_hit_G4_v2_2.wav"
+  },
+  "vibraphone": {
+    "A2": "Vibes_soft_A2_v2_rr2_Main.wav",
+    "A4": "Vibes_soft_A4_v2_rr3_Main.wav",
+    "B3": "Vibes_soft_B3_v2_rr2_Main.wav",
+    "C5": "Vibes_soft_C5_v2_rr2_Main.wav",
+    "D4": "Vibes_soft_D4_v2_rr2_Main.wav",
+    "E3": "Vibes_soft_E3_v2_rr2_Main.wav"
+  },
+  "violas": {
+    "A3": "ViolaEns_susvib_A3_v1_1.wav",
+    "B2": "ViolaEns_susvib_B2_v1_1.wav",
+    "C2": "ViolaEns_susvib_C2_v1_1.wav",
+    "D2": "ViolaEns_susvib_D2_v1_1.wav",
+    "E2": "ViolaEns_susvib_E2_v1_1.wav",
+    "F3": "ViolaEns_susvib_F3_v1_1.wav"
+  },
+  "violins": {
+    "A5": "VlnEns_Harm_A5.wav",
+    "C6": "VlnEns_Harm_C6.wav",
+    "G4": "VlnEns_Harm_G4.wav",
+    "A3": "VlnEns_susVib_A3_v1.wav",
+    "C4": "VlnEns_susVib_C4_v1.wav",
+    "D5": "VlnEns_susVib_D5_v1.wav"
+  }
+}

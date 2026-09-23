@@ -92,7 +92,7 @@ export function ChordBlock({
     <div 
       ref={blockRef}
       className="absolute top-2 bottom-2 transition-all cursor-pointer group" 
-      style={{ left: `${left + 2}px`, width: `${width - 4}px` }} 
+      style={{ left: `${left}px`, width: `${width}px` }} 
       onClick={toggleMenu}
       draggable={draggable && !isOpen}
       onDragStart={onDragStart}
@@ -101,7 +101,7 @@ export function ChordBlock({
     >
       <ChordRoll 
          chord={chord}
-         width={width - 4}
+         width={width}
          isSelected={isOpen}
          onResizeStart={(e, dir) => { e.stopPropagation(); onResizeStart(e, dir); }}
       />

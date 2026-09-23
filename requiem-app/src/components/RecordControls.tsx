@@ -1,7 +1,8 @@
 import { useState, useRef, useEffect } from "react";
 import type { TimeSignature } from "./TimeSignatureSelector";
 import { ALL_TONALITIES } from "../engine/TonalityAdapter";
-import { Plus, Settings2, Activity, Music } from "lucide-react";
+import { Plus, Settings2, Activity, Music, Mic2 } from "lucide-react";
+import { OrchestraArranger } from "./OrchestraArranger";
 
 interface RecordControlsProps {
   appState: string;
@@ -18,6 +19,11 @@ interface RecordControlsProps {
   setPreRecordBpm: (val: number | "AUTO") => void;
   preRecordTonality: string;
   setPreRecordTonality: (val: string) => void;
+  preRecordTemperature: number;
+  setPreRecordTemperature: (val: number) => void;
+  loadOrchestraInstrument: (id: string) => Promise<void>;
+  unloadOrchestraInstrument: (id: string) => void;
+  activeOrchestraInstruments: string[];
 }
 
 const COMMON_BPMS = [80, 90, 100, 120, 140, 160];
@@ -38,12 +44,20 @@ export function RecordControls({
   setPreRecordBpm,
   preRecordTonality,
   setPreRecordTonality,
+  preRecordTemperature,
+  setPreRecordTemperature,
+  loadOrchestraInstrument,
+  unloadOrchestraInstrument,
+  activeOrchestraInstruments
 }: RecordControlsProps) {
   const isInputDisabled = isButtonDisabled && appState !== "RECORDING";
   
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
+  const [isArrangerOpen, setIsArrangerOpen] = useState(false);
   const settingsRef = useRef<HTMLDivElement>(null);
+  const arrangerRef = useRef<HTMLDivElement>(null);
   const [customBpmStr, setCustomBpmStr] = useState<string>("");
+  const [loadingInstruments, setLoadingInstruments] = useState<string[]>([]);
 
   useEffect(() => {
     if (preRecordBpm === "AUTO") {
@@ -58,12 +72,25 @@ export function RecordControls({
       if (settingsRef.current && !settingsRef.current.contains(e.target as Node)) {
         setIsSettingsOpen(false);
       }
+      if (arrangerRef.current && !arrangerRef.current.contains(e.target as Node)) {
+        setIsArrangerOpen(false);
+      }
     };
-    if (isSettingsOpen) {
+    if (isSettingsOpen || isArrangerOpen) {
       document.addEventListener("mousedown", handleClickOutside);
     }
     return () => document.removeEventListener("mousedown", handleClickOutside);
-  }, [isSettingsOpen]);
+  }, [isSettingsOpen, isArrangerOpen]);
+
+  const handleToggleInstrument = async (id: string) => {
+    if (activeOrchestraInstruments.includes(id)) {
+      unloadOrchestraInstrument(id);
+    } else {
+      setLoadingInstruments(prev => [...prev, id]);
+      await loadOrchestraInstrument(id);
+      setLoadingInstruments(prev => prev.filter(i => i !== id));
+    }
+  };
 
   return (
     <div className="w-full max-w-3xl px-4 flex flex-col items-center transition-all duration-500 mb-8 z-20">
@@ -186,6 +213,41 @@ export function RecordControls({
                 ))}
               </select>
             </div>
+            
+            {/* Temperatura (Criatividade da IA) */}
+            <div className="flex-1 flex flex-col gap-2 pl-0 sm:pl-6 border-t sm:border-t-0 sm:border-l border-white/10 pt-4 sm:pt-0">
+              <span className="text-[10px] uppercase font-mono tracking-wider text-white/40 flex items-center justify-between gap-1.5">
+                <span className="flex items-center gap-1.5"><Activity size={12} /> Criatividade da IA</span>
+                <span className="text-emerald-400 font-bold">{preRecordTemperature.toFixed(1)}</span>
+              </span>
+              <input
+                type="range"
+                min="0.1"
+                max="1.5"
+                step="0.1"
+                value={preRecordTemperature}
+                onChange={(e) => setPreRecordTemperature(parseFloat(e.target.value))}
+                className="w-full mt-3 h-1.5 bg-black/40 rounded-lg appearance-none cursor-pointer border border-white/5 accent-emerald-500"
+              />
+              <div className="flex justify-between text-[8px] uppercase font-mono text-white/30 mt-1">
+                <span>Literal</span>
+                <span>Selvagem</span>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Orchestra Arranger Popup */}
+        {isArrangerOpen && !isInputDisabled && !isRecording && !isProcessing && (
+          <div 
+            ref={arrangerRef}
+            className="absolute bottom-full mb-3 left-0 sm:left-1/2 sm:-translate-x-1/2 w-[95vw] sm:w-[600px] flex flex-col items-center animate-fade-in origin-bottom z-50 rounded-t-full shadow-2xl"
+          >
+            <OrchestraArranger 
+              activeInstruments={activeOrchestraInstruments}
+              onToggleInstrument={handleToggleInstrument}
+              loadingInstruments={loadingInstruments}
+            />
           </div>
         )}
 
@@ -215,17 +277,35 @@ export function RecordControls({
             ) : isProcessing ? (
                <div className="w-10 h-10 sm:w-12 sm:h-12 flex items-center justify-center"><div className="w-4 h-4 border-2 border-white/20 border-t-white rounded-full animate-spin" /></div>
             ) : (
-               <button
-                 type="button"
-                 disabled={isInputDisabled}
-                 onClick={(e) => {
-                   e.stopPropagation();
-                   setIsSettingsOpen(!isSettingsOpen);
-                 }}
-                 className={`flex items-center justify-center w-10 h-10 sm:w-12 sm:h-12 bg-transparent transition-all duration-300 ${isSettingsOpen ? 'text-emerald-400' : 'text-white/50 hover:text-white/80'}`}
-               >
-                 <Plus className={`w-5 h-5 transition-transform duration-300 ${isSettingsOpen ? 'rotate-45' : ''}`} />
-               </button>
+               <div className="flex items-center gap-1">
+                 {/* Botão Maestro / Arranjador */}
+                 <button
+                   type="button"
+                   disabled={isInputDisabled}
+                   onClick={(e) => {
+                     e.stopPropagation();
+                     setIsArrangerOpen(!isArrangerOpen);
+                     setIsSettingsOpen(false);
+                   }}
+                   className={`flex items-center justify-center w-10 h-10 sm:w-12 sm:h-12 bg-transparent transition-all duration-300 ${isArrangerOpen ? 'text-amber-400' : 'text-white/50 hover:text-white/80'}`}
+                 >
+                   <Mic2 className={`w-5 h-5 transition-transform duration-300 ${isArrangerOpen ? 'scale-110' : ''}`} />
+                 </button>
+                 
+                 {/* Botão de Settings original */}
+                 <button
+                   type="button"
+                   disabled={isInputDisabled}
+                   onClick={(e) => {
+                     e.stopPropagation();
+                     setIsSettingsOpen(!isSettingsOpen);
+                     setIsArrangerOpen(false);
+                   }}
+                   className={`flex items-center justify-center w-10 h-10 sm:w-12 sm:h-12 bg-transparent transition-all duration-300 ${isSettingsOpen ? 'text-emerald-400' : 'text-white/50 hover:text-white/80'}`}
+                 >
+                   <Plus className={`w-5 h-5 transition-transform duration-300 ${isSettingsOpen ? 'rotate-45' : ''}`} />
+                 </button>
+               </div>
             )}
 
             {/* Custom Pills */}

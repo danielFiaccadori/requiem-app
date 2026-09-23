@@ -211,10 +211,10 @@ export function Sidebar({
                         className="w-full px-3 py-2 text-sm text-white bg-white/10 border border-white/20 rounded-lg outline-none"
                       />
                     ) : (
-                      <button
+                      <div
                         onClick={() => onSessionChange(session)}
                         onDoubleClick={e => handleStartRename(e, session)}
-                        className={`flex items-center w-full px-3 py-2.5 rounded-lg text-left transition-colors group ${
+                        className={`flex items-center w-full px-3 py-2.5 rounded-lg text-left transition-colors group cursor-pointer ${
                           activeSessionId === session.id
                             ? 'bg-white/10 text-white'
                             : 'text-white/60 hover:bg-white/5 hover:text-white'
@@ -232,7 +232,7 @@ export function Sidebar({
                             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
                           </svg>
                         </button>
-                      </button>
+                      </div>
                     )}
                   </li>
                 ))}

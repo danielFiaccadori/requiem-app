@@ -87,7 +87,7 @@ function autoCorrelate(buffer: Float32Array, sampleRate: number): number {
     rms += buffer[i] * buffer[i];
   }
   rms = Math.sqrt(rms / buffer.length);
-  if (rms < 0.008) return 0; // noise gate
+  if (rms < 0.015) return 0; // noise gate aumentado para não pegar ruído de fundo
 
   // Normalizar
   const len = buffer.length;
@@ -120,7 +120,8 @@ function autoCorrelate(buffer: Float32Array, sampleRate: number): number {
     }
   }
 
-  if (maxLag === -1 || maxVal < correlations[0] * 0.3) return 0;
+  // Aumentada a tolerância (confidence) de 0.3 para 0.5 para exigir uma afinação mais "firme"
+  if (maxLag === -1 || maxVal < correlations[0] * 0.5) return 0;
 
   const freq = sampleRate / maxLag;
 
@@ -239,8 +240,8 @@ export function usePitchDetector(): UsePitchDetectorReturn {
     try {
       const stream = await navigator.mediaDevices.getUserMedia({
         audio: {
-          echoCancellation: false,
-          noiseSuppression: false,
+          echoCancellation: true,   // Essencial para evitar que o mic capte os acordes das caixas
+          noiseSuppression: false,  // Mantemos off para fidelidade na transcrição offline
           autoGainControl: false,
           channelCount: 1,
         },
