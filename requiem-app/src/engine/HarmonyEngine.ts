@@ -12,7 +12,7 @@
 // ─────────────────────────────────────────────────────────
 
 import type { DetectedNote } from "../hooks/usePitchDetector";
-import { chordToRoman, getChordPitchClasses } from "./TonalityAdapter";
+import { chordToRoman, getChordPitchClasses, isChordDiatonic, getTonalityOffset } from "./TonalityAdapter";
 
 // ─────────────────────────────────────────────────────────
 //  1. Tipos públicos
@@ -388,7 +388,8 @@ export function determineNextChord(
   playedNotes: readonly DetectedNote[],
   windowStart: number,
   secondsPerBeat: number,
-  temperature: number = DEFAULT_TEMPERATURE
+  temperature: number = DEFAULT_TEMPERATURE,
+  tonality: string = "AUTO"
 ): { chord: string; velocity: number } {
   const currentChord = chordHistory.length > 0 ? chordHistory[chordHistory.length - 1] : "C";
   if (playedNotes.length === 0) return { chord: currentChord, velocity: 0.7 };
@@ -412,6 +413,36 @@ export function determineNextChord(
   }
   const avgAmplitude = Math.max(0.2, sumAmp / density);
 
+  // ── Cadence / Contour Heuristic ──
+  let isDescendingToTonic = false;
+  let isDescendingToDominant = false;
+  
+  if (tonality !== "AUTO" && tonality && density >= 3) {
+    const recentPitches = playedNotes.map(n => n.pitch);
+    const startPitch = recentPitches[0];
+    const endPitch = recentPitches[density - 1];
+    
+    // Verifica se a melodia caiu de forma geral (pelo menos 1 tom) na janela de captura
+    const isDescending = startPitch - endPitch >= 2;
+    
+    if (isDescending) {
+      const tonalityOffset = getTonalityOffset(tonality);
+      const currentPc = Math.round(endPitch) % 12;
+      
+      if (currentPc === tonalityOffset) {
+        // Melodia desceu e repousou na tônica (Grau I)
+        isDescendingToTonic = true;
+      } else if (
+        currentPc === (tonalityOffset + 7) % 12 || // Dominante (V)
+        currentPc === (tonalityOffset + 2) % 12 || // Supertônica (ii)
+        currentPc === (tonalityOffset + 11) % 12   // Sensível (vii°)
+      ) {
+        // Melodia desceu e repousou em zona de tensão que pede cadência
+        isDescendingToDominant = true;
+      }
+    }
+  }
+
   const candidates: string[] = [];
   const scores: number[] = [];
 
@@ -431,7 +462,37 @@ export function determineNextChord(
     const acousticScoreRaw = computeNoteScore(chordNotes, playedNotes, windowStart, secondsPerBeat, isHighDensity, avgAmplitude);
     const acousticScore = acousticScoreRaw / Math.max(1, density);
 
-    const finalScore = ACOUSTIC_WEIGHT * acousticScore + NEURAL_WEIGHT * neuralProb;
+    let finalScore = ACOUSTIC_WEIGHT * acousticScore + NEURAL_WEIGHT * neuralProb;
+
+    // ── Scale Masking (Filtro de Campo Harmônico) ──
+    if (tonality !== "AUTO" && tonality) {
+      const roman = chordToRoman(candidateName, tonality);
+      const baseRoman = roman.replace(/[^IVvxi]/g, '');
+
+      if (isChordDiatonic(candidateName, tonality)) {
+        // Forte bônus se pertence ao campo harmônico e a temperatura for baixa
+        const scaleBias = Math.max(1.0, 3.0 / Math.max(0.1, temperature));
+        finalScore *= scaleBias;
+      } else {
+        // Penalidade para acordes fora do tom
+        const penalty = Math.min(1.0, temperature / 2.0); 
+        finalScore *= penalty;
+      }
+
+      // ── Bônus de Contorno (Cadências) ──
+      if (isDescendingToTonic) {
+        // Se a melodia desceu para repousar na tônica, forçamos o acorde I ou i
+        if (baseRoman === "I" || baseRoman === "i") {
+          finalScore *= 5.0; // Bônus gigante de conclusão de frase
+        }
+      } else if (isDescendingToDominant) {
+        // Se desceu preparando para concluir (parou na quinta, segunda ou sensível),
+        // forçamos o acorde de Dominante (V) ou Sensível (vii)
+        if (baseRoman === "V" || baseRoman === "v" || baseRoman === "vii") {
+          finalScore *= 4.0; // Bônus de tensão preparatória
+        }
+      }
+    }
 
     candidates.push(candidateName);
     scores.push(finalScore);

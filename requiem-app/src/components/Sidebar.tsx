@@ -18,6 +18,7 @@ interface SidebarProps {
   onSessionRename: (id: string, newTitle: string) => void;
   activeSession?: ChatSession | null;
   onSearchClick?: () => void;
+  onShowcaseClick?: () => void;
 }
 
 export function Sidebar({
@@ -28,6 +29,7 @@ export function Sidebar({
   onSessionRename,
   activeSession,
   onSearchClick = () => {},
+  onShowcaseClick = () => {},
 }: SidebarProps) {
   const { user, logout } = useAuth();
   const [sessions, setSessions] = useState<ChatSession[]>([]);
@@ -64,7 +66,7 @@ export function Sidebar({
   }, [activeSession?.id, loadSessions]);
 
   const handleNewSession = async () => {
-    const BASE = 'Nova Composição';
+    const BASE = 'Novo músico';
     const existingCount = sessions.filter(s => s.title === BASE || s.title.startsWith(`${BASE} (`)).length;
     const title = existingCount === 0 ? BASE : `${BASE} (${existingCount + 1})`;
 
@@ -154,7 +156,7 @@ export function Sidebar({
           <span className={`ml-3 text-sm font-medium text-white/90 whitespace-nowrap overflow-hidden transition-all duration-300 ${
             isSidebarOpen ? 'opacity-100 w-auto' : 'opacity-0 w-0 hidden'
           }`}>
-            Nova composição
+            Novo músico
           </span>
         </button>
 
@@ -168,7 +170,21 @@ export function Sidebar({
           <span className={`ml-3 text-sm font-medium text-white/90 whitespace-nowrap overflow-hidden transition-all duration-300 ${
             isSidebarOpen ? 'opacity-100 w-auto' : 'opacity-0 w-0 hidden'
           }`}>
-            Pesquisar composições
+            Pesquisar músico
+          </span>
+        </button>
+
+        <button
+          onClick={onShowcaseClick}
+          className={`flex items-center p-2.5 rounded-lg hover:bg-white/10 transition-all ${
+            isSidebarOpen ? 'w-full' : 'w-11 justify-center'
+          }`}
+        >
+          <LayoutGrid className="w-5 h-5 text-white/80 flex-shrink-0" strokeWidth={1.5} />
+          <span className={`ml-3 text-sm font-medium text-white/90 whitespace-nowrap overflow-hidden transition-all duration-300 ${
+            isSidebarOpen ? 'opacity-100 w-auto' : 'opacity-0 w-0 hidden'
+          }`}>
+            Vitrine de músicos
           </span>
         </button>
       </div>
@@ -191,7 +207,7 @@ export function Sidebar({
               </div>
             ) : sessions.length === 0 ? (
               <p className="text-xs text-white/25 text-center mt-4 px-2">
-                Nenhuma composição ainda.<br />Clique em "Nova composição" para começar.
+                Nenhum músico ainda.<br />Clique em "Novo músico" para começar.
               </p>
             ) : (
               <ul className="space-y-0.5">

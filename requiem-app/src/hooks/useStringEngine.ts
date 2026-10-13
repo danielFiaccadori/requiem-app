@@ -7,7 +7,7 @@ export interface StringEngineApi {
   playMIDINote: (midi: number, duration?: number, velocity?: number, instrument?: InstrumentType | "orchestra") => void;
   playChord: (chordName: string, duration?: number, velocity?: number, instrument?: InstrumentType | "orchestra") => void;
   playSequence: (seq: any, offset?: number, melodyInst?: InstrumentType | "orchestra", chordsInst?: InstrumentType | "orchestra") => Promise<void>;
-  stopAll: () => void;
+  stopAll: (immediate?: boolean) => void;
   isReady: boolean;
   
   // Orchestra dynamic loading
@@ -79,7 +79,7 @@ export function useStringEngine(): StringEngineApi {
     padSynthRef.current = padSynth;
 
     // 4. Carregar Mapeamento do VSCO 2
-    fetch('/samples/instrument_map.json')
+    fetch(`/samples/instrument_map.json?v=${Date.now()}`)
       .then(r => r.json())
       .then(map => {
         orchestraMapRef.current = map;
@@ -113,12 +113,24 @@ export function useStringEngine(): StringEngineApi {
       return;
     }
 
+    // O navegador bloqueia áudio até que uma interação do usuário chame Tone.start()
+    if (Tone.context.state !== "running") {
+      Tone.start().catch(e => console.warn("Tone.start error:", e));
+    }
+
     console.log(`Loading orchestra instrument: ${id}`);
+    
+    // Configuração de blend (crossfade):
+    // Instrumentos percussivos têm ataque rápido. Cordas/Sopros têm ataque suave (fade-in) e release longo (fade-out)
+    const isPercussive = id === "piano" || id === "harp";
+    const attackTime = isPercussive ? 0.05 : 1.2;
+    const releaseTime = isPercussive ? 1.5 : 2.5;
+
     const sampler = new Tone.Sampler({
       urls,
       baseUrl: `/samples/${id}/`,
-      release: 1.5,
-      attack: 0.1,
+      release: releaseTime,
+      attack: attackTime,
       volume: -2, // Ajuste de ganho para não clipar
       onload: () => {
         loadedOrchestraRef.current[id] = sampler;
@@ -150,26 +162,28 @@ export function useStringEngine(): StringEngineApi {
     midi: number,
     duration: number = 0.5,
     velocity: number = 0.8,
-    instrument: InstrumentType | "orchestra" = "piano"
+    instrument: InstrumentType | "orchestra" = "piano",
+    delay: number = 0
   ) => {
     if (!isReady) return;
     try {
       const freq = Tone.Frequency(midi, "midi").toNote();
+      const time = Tone.now() + 0.05 + delay; // 50ms delay to prevent releaseAll() cancelling the attack
 
       if (instrument === "orchestra") {
         if (activeOrchestraInstruments.length === 0) {
           // Fallback para piano se orquestra vazia
-          pianoSynthRef.current?.triggerAttackRelease(freq, duration, undefined, velocity);
+          pianoSynthRef.current?.triggerAttackRelease(freq, duration, time, velocity);
         } else {
           // Tocar em TODOS os instrumentos da orquestra carregados
           activeOrchestraInstruments.forEach(id => {
-            loadedOrchestraRef.current[id]?.triggerAttackRelease(freq, duration, undefined, velocity);
+            loadedOrchestraRef.current[id]?.triggerAttackRelease(freq, duration, time, velocity);
           });
         }
       } else if (instrument === "piano") {
-        pianoSynthRef.current?.triggerAttackRelease(freq, duration, undefined, velocity);
+        pianoSynthRef.current?.triggerAttackRelease(freq, duration, time, velocity);
       } else if (instrument === "pad") {
-        padSynthRef.current?.triggerAttackRelease(freq, duration, undefined, velocity);
+        padSynthRef.current?.triggerAttackRelease(freq, duration, time, velocity);
       }
     } catch (e) {
       console.warn("Audio Context not started or invalid note", e);
@@ -253,10 +267,28 @@ export function useStringEngine(): StringEngineApi {
     return new Promise<void>(resolve => setTimeout(resolve, totalDuration * 1000));
   }, [isReady, activeOrchestraInstruments]);
 
-  const stopAll = useCallback(() => {
+  const stopAll = useCallback((immediate: boolean = false) => {
+    if (immediate) {
+      if (pianoSynthRef.current) (pianoSynthRef.current as any).release = 0.05;
+      if (padSynthRef.current) padSynthRef.current.set({ envelope: { release: 0.05 } });
+      Object.values(loadedOrchestraRef.current).forEach(s => {
+        (s as any).release = 0.05;
+      });
+    }
+
     pianoSynthRef.current?.releaseAll();
     padSynthRef.current?.releaseAll();
     Object.values(loadedOrchestraRef.current).forEach(s => s.releaseAll());
+
+    if (immediate) {
+      setTimeout(() => {
+        if (pianoSynthRef.current) (pianoSynthRef.current as any).release = 1.5;
+        if (padSynthRef.current) padSynthRef.current.set({ envelope: { release: 2.0 } });
+        Object.values(loadedOrchestraRef.current).forEach(s => {
+          (s as any).release = 2.5; // restore normal string release
+        });
+      }, 100);
+    }
   }, []);
 
   const setTrackVolume = useCallback((trackIndex: number, vol: number) => {

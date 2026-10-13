@@ -1,10 +1,10 @@
 {
   "bassoon": {
-    "A#0": "PSBassoon_A#0_v2_2.wav",
-    "A#3": "PSBassoon_A#3_v2_1.wav",
+    "A#0": "PSBassoon_As0_v2_2.wav",
+    "A#3": "PSBassoon_As3_v2_1.wav",
     "A2": "PSBassoon_A2_v2_1.wav",
     "C3": "PSBassoon_C3_v2_1.wav",
-    "D#2": "PSBassoon_D#2_v2_2.wav",
+    "D#2": "PSBassoon_Ds2_v2_2.wav",
     "E2": "PSBassoon_E2_v2_1.wav"
   },
   "cellos": {
@@ -19,7 +19,7 @@
     "A0": "Sum_JBCtbss_pizz_A0_v2_rr1.wav",
     "A1": "Sum_JBCtbss_pizz_A1_v2_rr1.wav",
     "C2": "Sum_JBCtbss_pizz_C2_v2_rr1.wav",
-    "D#2": "Sum_JBCtbss_pizz_D#2_v2_rr1.wav",
+    "D#2": "Sum_JBCtbss_pizz_Ds2_v2_rr1.wav",
     "E0": "Sum_JBCtbss_pizz_E0_v2_rr1.wav",
     "E1": "Sum_JBCtbss_pizz_E1_v2_rr1.wav"
   },
@@ -39,8 +39,8 @@
     "D2": "KSHarp_D2_mf1.wav"
   },
   "horn": {
-    "A#2": "SGHorn_sus_A#2_v2_rr1_Sum.wav",
-    "A#3": "SGHorn_sus_A#3_v2_rr1_Sum.wav",
+    "A#2": "SGHorn_sus_As2_v2_rr1_Sum.wav",
+    "A#3": "SGHorn_sus_As3_v2_rr1_Sum.wav",
     "D2": "SGHorn_sus_D2_v2_rr2_Sum.wav",
     "D3": "SGHorn_sus_D3_v2_rr3_Sum.wav",
     "F3": "SGHorn_sus_F3_v2_rr1_Sum.wav"
@@ -70,13 +70,13 @@
     "G4": "Timpani4_Roll_v3_rr1_Sum.wav"
   },
   "trombone": {
-    "A#1": "7TbnEns_sus_A#1_v3_rr1_Sum.wav",
-    "A#3": "7TbnEns_sus_A#3_v3_rr1_Sum.wav",
+    "A#1": "7TbnEns_sus_As1_v3_rr1_Sum.wav",
+    "A#3": "7TbnEns_sus_As3_v3_rr1_Sum.wav",
     "F2": "7TbnEns_stac_F2_v3_rr3_Sum.wav",
-    "F#1": "7TbnEns_sus_F#1_v3_rr1_Sum.wav"
+    "F#1": "7TbnEns_sus_Fs1_v3_rr1_Sum.wav"
   },
   "trumpet": {
-    "A#3": "Sum_SHTrumpet_sus_A#3_v2_rr1.wav",
+    "A#3": "Sum_SHTrumpet_sus_As3_v2_rr1.wav",
     "C3": "Sum_SHTrumpet_sus_C3_v2_rr2.wav",
     "C5": "Sum_SHTrumpet_sus_C5_v1_rr2.wav",
     "D4": "Sum_SHTrumpet_sus_D4_v2_rr1.wav",
@@ -84,9 +84,9 @@
     "F4": "Sum_SHTrumpet_sus_F4_v2_rr2.wav"
   },
   "tuba": {
-    "A#0": "Tuba3_stac_A#0_rr3_Mid.wav",
-    "A#1": "Tuba3_sfz_A#1_rr2_Mid.wav",
-    "A#2": "Tuba3_stac_A#2_rr6_Mid.wav",
+    "A#0": "Tuba3_stac_As0_rr3_Mid.wav",
+    "A#1": "Tuba3_sfz_As1_rr2_Mid.wav",
+    "A#2": "Tuba3_stac_As2_rr6_Mid.wav",
     "D2": "Tuba3_stac_D2_rr5_Mid.wav",
     "F1": "Tuba3_stac_F1_rr4_Mid.wav"
   },

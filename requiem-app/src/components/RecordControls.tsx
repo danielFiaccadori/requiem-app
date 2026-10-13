@@ -1,8 +1,9 @@
 import { useState, useRef, useEffect } from "react";
 import type { TimeSignature } from "./TimeSignatureSelector";
 import { ALL_TONALITIES } from "../engine/TonalityAdapter";
-import { Plus, Settings2, Activity, Music, Mic2 } from "lucide-react";
+import { Plus, Settings2, Activity, Music, Mic2, Piano } from "lucide-react";
 import { OrchestraArranger } from "./OrchestraArranger";
+import type { InstrumentType } from "../hooks/useStringEngine";
 
 interface RecordControlsProps {
   appState: string;
@@ -10,8 +11,6 @@ interface RecordControlsProps {
   isProcessing: boolean;
   currentFrequency: number;
   currentNote: string;
-  isButtonDisabled: boolean;
-  handleMainButtonClick: () => void;
   stateLabels: Record<string, string>;
   preRecordTimeSignature: TimeSignature;
   setPreRecordTimeSignature: (val: TimeSignature) => void;
@@ -24,6 +23,9 @@ interface RecordControlsProps {
   loadOrchestraInstrument: (id: string) => Promise<void>;
   unloadOrchestraInstrument: (id: string) => void;
   activeOrchestraInstruments: string[];
+  onArrangerOpenChange?: (isOpen: boolean) => void;
+  chordsInstrument?: InstrumentType | "orchestra";
+  setChordsInstrument?: (val: InstrumentType | "orchestra") => void;
 }
 
 const COMMON_BPMS = [80, 90, 100, 120, 140, 160];
@@ -36,8 +38,6 @@ export function RecordControls({
   isProcessing,
   currentFrequency,
   currentNote,
-  isButtonDisabled,
-  handleMainButtonClick,
   preRecordTimeSignature,
   setPreRecordTimeSignature,
   preRecordBpm,
@@ -48,9 +48,12 @@ export function RecordControls({
   setPreRecordTemperature,
   loadOrchestraInstrument,
   unloadOrchestraInstrument,
-  activeOrchestraInstruments
+  activeOrchestraInstruments,
+  onArrangerOpenChange,
+  chordsInstrument,
+  setChordsInstrument,
 }: RecordControlsProps) {
-  const isInputDisabled = isButtonDisabled && appState !== "RECORDING";
+  const isInputDisabled = isProcessing;
   
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [isArrangerOpen, setIsArrangerOpen] = useState(false);
@@ -58,6 +61,10 @@ export function RecordControls({
   const arrangerRef = useRef<HTMLDivElement>(null);
   const [customBpmStr, setCustomBpmStr] = useState<string>("");
   const [loadingInstruments, setLoadingInstruments] = useState<string[]>([]);
+
+  useEffect(() => {
+    onArrangerOpenChange?.(isArrangerOpen);
+  }, [isArrangerOpen, onArrangerOpenChange]);
 
   useEffect(() => {
     if (preRecordBpm === "AUTO") {
@@ -234,6 +241,39 @@ export function RecordControls({
                 <span>Selvagem</span>
               </div>
             </div>
+
+            {/* Timbre da Harmonia */}
+            {setChordsInstrument && (
+              <div className="flex-1 flex flex-col gap-2 pl-0 sm:pl-6 border-t sm:border-t-0 sm:border-l border-white/10 pt-4 sm:pt-0">
+                <span className="text-[10px] uppercase font-mono tracking-wider text-white/40 flex items-center justify-between gap-1.5">
+                  <span className="flex items-center gap-1.5"><Piano size={12} /> Timbre da Harmonia</span>
+                </span>
+                <div className="flex flex-col gap-1.5 mt-2">
+                  {[
+                    { id: "piano", label: "Piano Acústico", desc: "Arpejos adaptativos do MIDI" },
+                    { id: "orchestra", label: "Orquestra", desc: "Arranjo orquestral" },
+                    { id: "pad", label: "Pad Ethereal", desc: "Sustentação atmosférica" },
+                  ].map((inst) => {
+                    const isSelected = chordsInstrument === inst.id || (inst.id === "piano" && chordsInstrument === "orchestra" && activeOrchestraInstruments.length === 0);
+                    return (
+                      <button
+                        key={inst.id}
+                        type="button"
+                        onClick={() => setChordsInstrument(inst.id as any)}
+                        className={`text-left px-2.5 py-1.5 rounded-lg text-xs transition-colors border ${
+                          isSelected
+                            ? "bg-emerald-500/20 text-emerald-400 border-emerald-500/30 font-medium"
+                            : "bg-black/40 border-white/5 text-white/60 hover:bg-white/5 hover:text-white"
+                        }`}
+                      >
+                        <div className="text-xs">{inst.label}</div>
+                        <div className="text-[9px] text-white/40 font-mono">{inst.desc}</div>
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
           </div>
         )}
 
@@ -336,22 +376,10 @@ export function RecordControls({
                 ? (currentNote ? `${currentNote} (${currentFrequency}Hz)` : 'Gravando sinal...') 
                 : isProcessing 
                 ? 'Processando Harmonia...' 
-                : 'Iniciar captura de áudio...'}
+                : 'Clique no Requiem para iniciar'}
             </span>
           </div>
 
-          <button 
-            type="button"
-            disabled={isInputDisabled}
-            onClick={!isInputDisabled && !isSettingsOpen ? handleMainButtonClick : undefined}
-            className={`flex-shrink-0 w-12 h-12 flex items-center justify-center rounded-xl transition-all duration-300 ${!isInputDisabled && !isSettingsOpen ? 'cursor-pointer hover:scale-105' : 'cursor-not-allowed'} ${isRecording ? 'bg-red-500/20 text-red-400 shadow-[0_0_15px_rgba(239,68,68,0.4)]' : 'bg-white/5 text-white/50 hover:bg-white/15 hover:text-white'}`}
-          >
-            {isRecording ? (
-              <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 24 24"><rect x="6" y="6" width="12" height="12" rx="2" /></svg>
-            ) : (
-              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.5" d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z" /></svg>
-            )}
-          </button>
         </div>
 
         {/* AI Disclaimer */}

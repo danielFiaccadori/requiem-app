@@ -61,7 +61,7 @@ export function SearchScreen({ onSessionSelect, onClose }: SearchScreenProps) {
           <input
             type="text"
             autoFocus
-            placeholder="Pesquisar composições"
+            placeholder="Pesquisar músicos"
             value={searchQuery}
             onChange={e => setSearchQuery(e.target.value)}
             className="w-full bg-white/5 hover:bg-white/10 focus:bg-white/10 border-none outline-none text-white placeholder-white/40 rounded-lg py-4 pl-12 pr-4 transition-all"
@@ -79,7 +79,7 @@ export function SearchScreen({ onSessionSelect, onClose }: SearchScreenProps) {
                ))}
              </div>
           ) : filteredSessions.length === 0 ? (
-            <p className="text-white/40 text-sm px-2">Nenhuma composição encontrada.</p>
+            <p className="text-white/40 text-sm px-2">Nenhum músico encontrado.</p>
           ) : (
             <ul className="space-y-1 overflow-y-auto max-h-[60vh] scrollbar-hide pb-20">
               {filteredSessions.map(session => (

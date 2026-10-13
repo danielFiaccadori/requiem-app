@@ -115,10 +115,11 @@ const CHORD_REGEX = /^([A-G][#b]?)(.*)$/;
  */
 const parseChord = (
   chordName: string,
-): { root: string; suffix: string } | null => {
-  const match = chordName.match(CHORD_REGEX);
+): { root: string; suffix: string; bass?: string } | null => {
+  const [base, bass] = chordName.split("/");
+  const match = base.match(CHORD_REGEX);
   if (!match) return null;
-  return { root: match[1], suffix: match[2] };
+  return { root: match[1], suffix: match[2], bass };
 };
 
 /**
@@ -208,7 +209,15 @@ export const transposeChord = (
   const newIndex = (rootIndex + offset) % 12;
   const noteNames = noteNamesFor(targetTonality);
 
-  return noteNames[newIndex] + parsed.suffix;
+  let bassSuffix = "";
+  if (parsed.bass) {
+    const bassIdx = ROOT_OFFSETS[parsed.bass];
+    if (bassIdx !== undefined) {
+      bassSuffix = "/" + noteNames[(bassIdx + offset) % 12];
+    }
+  }
+
+  return noteNames[newIndex] + parsed.suffix + bassSuffix;
 };
 
 /**
@@ -261,8 +270,15 @@ export const normalizeProgressionToC = (
     if (rootIndex === undefined) return chordName;
 
     const newIndex = ((rootIndex - offset) % 12 + 12) % 12;
+    let bassSuffix = "";
+    if (parsed.bass) {
+      const bassIdx = ROOT_OFFSETS[parsed.bass];
+      if (bassIdx !== undefined) {
+        bassSuffix = "/" + NOTE_NAMES_SHARP[((bassIdx - offset) % 12 + 12) % 12];
+      }
+    }
     // Sempre usar sharps no Local Space (consistência interna)
-    return NOTE_NAMES_SHARP[newIndex] + parsed.suffix;
+    return NOTE_NAMES_SHARP[newIndex] + parsed.suffix + bassSuffix;
   });
 };
 
@@ -303,6 +319,40 @@ export const chordToRoman = (chord: string, tonality: string): string => {
   }
   
   return roman + suffix;
+};
+
+/**
+ * Verifica se um acorde pertence estritamente ao campo harmônico da tonalidade fornecida.
+ * Ex: Em Dó Maior (ou Lá Menor), os acordes diatônicos são C, Dm, Em, F, G, Am, Bdim.
+ */
+export const isChordDiatonic = (chord: string, tonality: string): boolean => {
+  if (tonality === "AUTO" || !tonality) return true;
+
+  const parsed = parseChord(chord);
+  if (!parsed) return false;
+
+  const rootOffset = ROOT_OFFSETS[parsed.root];
+  if (rootOffset === undefined) return false;
+  
+  const tonalityOffset = getTonalityOffset(tonality);
+
+  // Intervalo em semitons da tônica da tonalidade até a tônica do acorde (0 - 11)
+  const interval = (rootOffset - tonalityOffset + 12) % 12;
+
+  const isMinor = parsed.suffix.startsWith("m") && !parsed.suffix.startsWith("maj");
+  const isDim = parsed.suffix.startsWith("dim");
+  const isMajor = !isMinor && !isDim;
+
+  // Campo harmônico maior (e seu respectivo menor natural)
+  if (interval === 0 && isMajor) return true;  // I
+  if (interval === 2 && isMinor) return true;  // ii
+  if (interval === 4 && isMinor) return true;  // iii
+  if (interval === 5 && isMajor) return true;  // IV
+  if (interval === 7 && isMajor) return true;  // V
+  if (interval === 9 && isMinor) return true;  // vi
+  if (interval === 11 && isDim) return true;   // vii°
+
+  return false;
 };
 
 /**
@@ -382,7 +432,14 @@ export const getChordPitchClasses = (chordName: string): number[] => {
     intervals = [0, 5, 7]; // Fallback genérico para sus
   }
   
-  return intervals.map(interval => (rootIndex + interval) % 12);
+  const res = intervals.map(interval => (rootIndex + interval) % 12);
+  if (parsed.bass) {
+    const bassIdx = ROOT_OFFSETS[parsed.bass];
+    if (bassIdx !== undefined && !res.includes(bassIdx)) {
+      res.unshift(bassIdx);
+    }
+  }
+  return res;
 };
 
 // ─────────────────────────────────────────────────────────

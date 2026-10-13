@@ -6,6 +6,11 @@ interface DynamicRingProps {
   currentNote?: string;
   onClick?: () => void;
   intensity?: number; 
+  onDrop?: (e: React.DragEvent<HTMLDivElement>) => void;
+  onDragOver?: (e: React.DragEvent<HTMLDivElement>) => void;
+  onDragEnter?: (e: React.DragEvent<HTMLDivElement>) => void;
+  onDragLeave?: (e: React.DragEvent<HTMLDivElement>) => void;
+  isDragActive?: boolean;
 }
 
 export const DynamicRing = memo(function DynamicRing({
@@ -14,6 +19,11 @@ export const DynamicRing = memo(function DynamicRing({
   currentNote,
   onClick,
   intensity,
+  onDrop,
+  onDragOver,
+  onDragEnter,
+  onDragLeave,
+  isDragActive,
 }: DynamicRingProps) {
   const hasFreq = currentFrequency > 0;
   
@@ -27,8 +37,8 @@ export const DynamicRing = memo(function DynamicRing({
     ? "w-48 h-48 sm:w-64 sm:h-64 mb-8" 
     : "w-32 h-32 sm:w-48 sm:h-48 mb-8";
 
-  // Expansão mais orgânica e elástica baseada no volume
-  const scale = hasFreq ? 1 + activeIntensity * 0.35 : 1;
+  // Expansão mais orgânica e elástica baseada no volume, se arrastando fica um pouco maior
+  const scale = isDragActive ? 1.1 : (hasFreq ? 1 + activeIntensity * 0.35 : 1);
   
   // Velocidade da rotação principal
   const rotationDuration = hasFreq 
@@ -69,8 +79,12 @@ export const DynamicRing = memo(function DynamicRing({
 
   return (
     <div 
-      className={`relative flex items-center justify-center mt-4 transition-all duration-1000 ease-[cubic-bezier(0.22,1,0.36,1)] ${sizeClass} ${!isActive ? 'animate-pulse-subtle' : ''} ${onClick ? 'cursor-pointer hover:scale-105' : ''}`}
+      className={`relative flex items-center justify-center mt-4 transition-all duration-1000 ease-[cubic-bezier(0.22,1,0.36,1)] ${sizeClass} ${!isActive ? 'animate-pulse-subtle' : ''} ${onClick ? 'cursor-pointer hover:scale-105' : ''} ${isDragActive ? 'scale-110 shadow-[0_0_50px_rgba(255,255,255,0.3)] rounded-full ring-2 ring-white/50' : ''}`}
       onClick={onClick}
+      onDrop={onDrop}
+      onDragOver={onDragOver}
+      onDragEnter={onDragEnter}
+      onDragLeave={onDragLeave}
     >
       
       {/* Brilho de fundo pulsante unificado */}

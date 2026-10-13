@@ -12,8 +12,13 @@ import { RecordControls } from "./components/RecordControls";
 import { DynamicRing } from "./components/DynamicRing";
 import type { ChatSession, SerializedBlock } from "./lib/api";
 import { apiSaveComposition, apiCreateSession } from "./lib/api";
+import * as Tone from "tone";
+import { Midi } from "@tonejs/midi";
+import { Upload } from "lucide-react";
 
 import { StudioView } from "./components/StudioView";
+import { SearchScreen } from "./components/SearchScreen";
+import { ShowcaseScreen } from "./components/ShowcaseScreen";
 import type { AppTab } from "./components/BottomNav";
 import { generateProgression, warmUpModel, determineNextChord } from "./engine/HarmonyEngine";
 import {
@@ -23,11 +28,21 @@ import {
   getChordPitchClasses
 } from "./engine/TonalityAdapter";
 import { detectKey, estimateBPM } from "./engine/AudioAnalyzer";
+import { extractChordsFromMidi } from "./engine/ChordExtractor";
 import { Starfield } from "./components/Starfield";
-
-// ─────────────────────────────────────────────────────────
-//  Máquina de Estados do fluxo principal
-// ─────────────────────────────────────────────────────────
+import { ScoreFollower } from "./engine/ScoreFollower";
+import { detectMidiKey } from "./engine/KeyDetector";
+import {
+  buildSongScore,
+  scoreToChordSegments,
+  transposeSongScore,
+  getSemitoneDifference,
+} from "./engine/ScoreBuilder";
+import type { SongScore } from "./engine/ScoreBuilder";
+import { SHOWCASE_SONGS, findSong } from "./songs/catalog";
+// â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+//  MÃ¡quina de Estados do fluxo principal
+// â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 export type AppState =
   | "IDLE"
   | "RECORDING"
@@ -65,32 +80,32 @@ export interface CompositionBlock {
   newlyGenerated?: boolean;
 }
 
-// ── Stale-closure-safe label map ────────────────────────
+// â”€â”€ Stale-closure-safe label map â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 const STATE_LABELS: Record<AppState, string> = {
   IDLE: "Iniciar Captura",
-  RECORDING: "Gravando · Clique para parar",
-  REVIEW_RECORDING: "Analisar áudio gravado?",
-  PROCESSING: "Transcrevendo áudio e gerando harmonia...",
+  RECORDING: "Gravando Â· Clique para parar",
+  REVIEW_RECORDING: "Analisar Ã¡udio gravado?",
+  PROCESSING: "Transcrevendo Ã¡udio e gerando harmonia...",
 };
 
-// ─────────────────────────────────────────────────────────
-//  Utilidades de conversão
-// ─────────────────────────────────────────────────────────
+// â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+//  Utilidades de conversÃ£o
+// â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
-// ─────────────────────────────────────────────────────────
-//  Pré-processamento de notas detectadas
-// ─────────────────────────────────────────────────────────
+// â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+//  PrÃ©-processamento de notas detectadas
+// â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 /**
- * Pré-processa as notas vindas do Basic Pitch.
+ * PrÃ©-processa as notas vindas do Basic Pitch.
  *
  * 1. Ordena por startTime (Basic Pitch pode retornar fora de ordem).
- * 2. Filtra notas muito curtas (< 80ms — ruído da rede neural).
+ * 2. Filtra notas muito curtas (< 80ms â€” ruÃ­do da rede neural).
  * 3. Para notas de MESMO pitch (exatamente), cola fragmentos
  *    separados por gaps < 0.25s (vibrato/tremolo).
  *
- * ⚠ NÃO funde notas de pitches diferentes (Basic Pitch é polifônico,
- *   notas simultâneas em pitches distintos são legítimas).
+ * âš  NÃƒO funde notas de pitches diferentes (Basic Pitch Ã© polifÃ´nico,
+ *   notas simultÃ¢neas em pitches distintos sÃ£o legÃ­timas).
  */
 function glueNotes(rawNotes: DetectedNote[]): DetectedNote[] {
   if (rawNotes.length === 0) return [];
@@ -116,7 +131,7 @@ function glueNotes(rawNotes: DetectedNote[]): DetectedNote[] {
   const result: DetectedNote[] = [];
 
   for (const [, notes] of byPitch) {
-    // Notas já estão ordenadas por startTime (herdam do sorted)
+    // Notas jÃ¡ estÃ£o ordenadas por startTime (herdam do sorted)
     const merged: DetectedNote[] = [{ ...notes[0] }];
 
     for (let i = 1; i < notes.length; i++) {
@@ -125,7 +140,7 @@ function glueNotes(rawNotes: DetectedNote[]): DetectedNote[] {
       const gap = current.startTime - last.endTime;
 
       if (gap < 0.25) {
-        // Mesmo pitch, gap pequeno → colar
+        // Mesmo pitch, gap pequeno â†’ colar
         last.endTime = Math.max(last.endTime, current.endTime);
       } else {
         merged.push({ ...current });
@@ -140,12 +155,12 @@ function glueNotes(rawNotes: DetectedNote[]): DetectedNote[] {
   return result;
 }
 
-// ─────────────────────────────────────────────────────────
-//  Conversão: Progressão de acordes → NoteSequence
-// ─────────────────────────────────────────────────────────
+// â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+//  ConversÃ£o: ProgressÃ£o de acordes â†’ NoteSequence
+// â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 /**
- * Constrói a melodia original como NoteSequence quantizado.
+ * ConstrÃ³i a melodia original como NoteSequence quantizado.
  */
 function buildMelodySequence(
   notes: DetectedNote[],
@@ -187,12 +202,12 @@ function buildMelodySequence(
 }
 
 /**
- * Sintetiza a progressão de acordes em notas de harmonia
+ * Sintetiza a progressÃ£o de acordes em notas de harmonia
  * e as mescla com a melodia original em um NoteSequence.
  *
- * Cada acorde da progressão ocupa um compasso inteiro.
- * As notas do acorde são distribuídas numa oitava
- * confortável (MIDI 48–60 → C3–C4) como um bloco
+ * Cada acorde da progressÃ£o ocupa um compasso inteiro.
+ * As notas do acorde sÃ£o distribuÃ­das numa oitava
+ * confortÃ¡vel (MIDI 48â€“60 â†’ C3â€“C4) como um bloco
  * sustentado (whole-note / semibreve por compasso).
  */
 function progressionToNoteSequence(
@@ -250,27 +265,33 @@ function progressionToNoteSequence(
   return ns;
 }
 
-// ─────────────────────────────────────────────────────────
+// â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 //  App Component
-// ─────────────────────────────────────────────────────────
+// â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 export default function App() {
 
-  // ── UI state ──────────────────────────────────────────
+  // â”€â”€ UI state â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
+  const [isSearchOpen, setIsSearchOpen] = useState(false);
+  const [isShowcaseOpen, setIsShowcaseOpen] = useState(false);
   const [bpm, setBpm] = useState(120);
   const [qtValue, setQtValue] = useState(4);
   const [utValue, setUtValue] = useState(4);
   const [tonality, setTonality] = useState<string>("AUTO");
 
   const [appState, setAppState] = useState<AppState>("IDLE");
+  const [customSongs, setCustomSongs] = useState<SongManifest[]>([]);
+  const [draftManifest, setDraftManifest] = useState<SongManifest | null>(null);
+  const [isDragActive, setIsDragActive] = useState(false);
   const [preRecordTimeSignature, setPreRecordTimeSignature] = useState({ numerator: 4, denominator: 4 });
   const [preRecordBpm, setPreRecordBpm] = useState<number | "AUTO">("AUTO");
   const [preRecordTonality, setPreRecordTonality] = useState<string>("AUTO");
   const [preRecordTemperature, setPreRecordTemperature] = useState<number>(0.7);
+  const [isArrangerOpen, setIsArrangerOpen] = useState(false);
 
   const [melodyInstrument, setMelodyInstrument] = useState<InstrumentType | "orchestra">("piano");
-  const [chordsInstrument, setChordsInstrument] = useState<InstrumentType | "orchestra">("orchestra");
+  const [chordsInstrument, setChordsInstrument] = useState<InstrumentType | "orchestra">("piano");
   const [selectedTrackIndex, setSelectedTrackIndex] = useState<number | null>(null);
   
   const [melodyVolume, setMelodyVolume] = useState(1);
@@ -289,6 +310,40 @@ export default function App() {
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<AppTab>("vibe");
 
+  const [activeScore, setActiveScore] = useState<SongScore | null>(null);
+  const activeScoreRef = useRef<SongScore | null>(null);
+  useEffect(() => {
+    activeScoreRef.current = activeScore;
+  }, [activeScore]);
+  const [activeManifest, setActiveManifest] = useState<SongManifest | null>(null);
+  const scoreFollowerRef = useRef<ScoreFollower | null>(null);
+
+  // Local persistence (TODO: replace with API persistence)
+  const sessionManifestsRef = useRef<Record<string, SongManifest>>(
+    (() => { try { return JSON.parse(localStorage.getItem("requiem.sessionManifests") || "{}"); } catch { return {}; } })()
+  );
+  const rememberSessionManifest = useCallback((sessionId: string, manifest: SongManifest) => {
+    sessionManifestsRef.current = { ...sessionManifestsRef.current, [sessionId]: manifest };
+    try { localStorage.setItem("requiem.sessionManifests", JSON.stringify(sessionManifestsRef.current)); } catch (e) { console.warn("Failed to persist session manifests", e); }
+  }, []);
+  useEffect(() => {
+    try {
+      const saved = localStorage.getItem("requiem.customSongs");
+      if (saved) setCustomSongs(JSON.parse(saved));
+      const draft = localStorage.getItem("requiem.draftManifest");
+      if (draft) setDraftManifest(JSON.parse(draft));
+    } catch (e) { console.warn("Failed to load local musicians", e); }
+  }, []);
+  useEffect(() => {
+    try { localStorage.setItem("requiem.customSongs", JSON.stringify(customSongs)); } catch (e) { console.warn("Failed to persist custom songs", e); }
+  }, [customSongs]);
+  useEffect(() => {
+    try {
+      if (draftManifest) localStorage.setItem("requiem.draftManifest", JSON.stringify(draftManifest));
+      else localStorage.removeItem("requiem.draftManifest");
+    } catch (e) { console.warn("Failed to persist draft", e); }
+  }, [draftManifest]);
+
   const stringEngine = useStringEngine();
   const { 
     playMIDINote, 
@@ -300,7 +355,7 @@ export default function App() {
     activeOrchestraInstruments
   } = stringEngine;
 
-  // ── Session state ───────────────────────────────────────────────
+  // â”€â”€ Session state â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   const [activeSession, setActiveSession] = useState<ChatSession | null>(null);
   const activeSessionRef = useRef<ChatSession | null>(null);
 
@@ -310,12 +365,17 @@ export default function App() {
   }, [activeSession]);
 
   // When user picks a session from the sidebar, restore its composition
-  const handleSessionChange = useCallback((session: ChatSession | null) => {
+    const handleSessionChange = useCallback((session: ChatSession | null) => {
     setActiveSession(session);
     if (!session) return;
 
+    // Reset followers/scores by default when switching sessions unless explicitly set by Showcase
+    setActiveScore(null);
+    setActiveManifest(sessionManifestsRef.current[session.id] ?? null);
+    if (scoreFollowerRef.current) scoreFollowerRef.current = null;
+
     if (session.compositionData && session.compositionData.length > 0) {
-      // Rebuild blocks from persisted data (no noteSequence — rebuilt on first play)
+      // Rebuild blocks from persisted data (no noteSequence â€” rebuilt on first play)
       const restored: CompositionBlock[] = session.compositionData.map(b => ({
         id: b.id,
         name: b.name,
@@ -338,9 +398,46 @@ export default function App() {
       }));
       setBlocks(restored);
       setActiveBlockId(restored[0].id);
-      setActiveTab(restored[0].noteSequence ? "studio" : "vibe");
+      setActiveTab("vibe");
+
+      // Restore UI settings from the block
+      setPreRecordTimeSignature({ 
+        numerator: parseInt(restored[0].timeSignature.split('/')[0]) || 4, 
+        denominator: parseInt(restored[0].timeSignature.split('/')[1]) || 4 
+      });
+      setPreRecordBpm(restored[0].bpm);
+      setPreRecordTonality(restored[0].key);
+
+      // Check if this is a showcase session or custom session to reload MIDI
+      const targetManifest = SHOWCASE_SONGS.find(s => s.title === session.title) || sessionManifestsRef.current[session.id];
+      if (targetManifest && targetManifest.midiUrl) {
+         (async () => {
+             try {
+               let parsedMidi: any;
+               if (targetManifest.midiUrl.startsWith("data:")) {
+                 const res = await fetch(targetManifest.midiUrl);
+                 const buffer = await res.arrayBuffer();
+                 parsedMidi = new Midi(buffer);
+               } else {
+                 parsedMidi = await Midi.fromUrl(targetManifest.midiUrl);
+               }
+               let score = buildSongScore(parsedMidi as any, targetManifest);
+               const targetKey = restored[0]?.key || targetManifest.key;
+               if (targetKey && targetKey !== score.key) {
+                 const semitones = getSemitoneDifference(score.key, targetKey);
+                 score = transposeSongScore(score, semitones, targetKey);
+               }
+               setActiveScore(score);
+               scoreFollowerRef.current = new ScoreFollower(score);
+               console.log("[handleSessionChange] Restored MIDI:", score);
+             } catch (err) {
+               console.error("Failed to restore midi", err);
+             }
+         })();
+      }
+
     } else {
-      // New empty session — reset to default
+      // New empty session â€” reset to default
       const defaultBlock: CompositionBlock = {
         id: Date.now().toString(),
         name: "Verso 1",
@@ -353,6 +450,11 @@ export default function App() {
       setBlocks([defaultBlock]);
       setActiveBlockId(defaultBlock.id);
       setActiveTab("vibe");
+      
+      // Reset pre-record settings for a new normal musician
+      setPreRecordTimeSignature({ numerator: 4, denominator: 4 });
+      setPreRecordBpm("AUTO");
+      setPreRecordTonality("AUTO");
     }
   }, []);
 
@@ -360,7 +462,7 @@ export default function App() {
     setActiveSession(prev => prev?.id === id ? { ...prev, title: newTitle } : prev);
   }, []);
 
-  // ── Refs ──────────────────────────────────────────────
+  // â”€â”€ Refs â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   const appStateRef = useRef<AppState>("IDLE");
   const playingIndexRef = useRef<number | null>(null);
   const recordedBpmRef = useRef<number>(120);
@@ -370,10 +472,10 @@ export default function App() {
     appStateRef.current = appState;
   }, [appState]);
 
-  // ── Hooks personalizados ──────────────────────────────
+  // â”€â”€ Hooks personalizados â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     const pitchDetector = usePitchDetector();
 
-  // ── Sincronizar Volume/Mute com Engine ────────────────
+  // â”€â”€ Sincronizar Volume/Mute com Engine â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   useEffect(() => {
     stringEngine.setTrackVolume(0, melodyVolume);
     stringEngine.setTrackMute(0, melodyMuted);
@@ -384,7 +486,7 @@ export default function App() {
     stringEngine.setTrackMute(1, chordsMuted);
   }, [chordsVolume, chordsMuted, stringEngine]);
 
-  // ── Sincronizar Bloco Ativo com Global State ───────────
+  // â”€â”€ Sincronizar Bloco Ativo com Global State â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   useEffect(() => {
     if (activeBlock) {
       setBpm(activeBlock.bpm);
@@ -395,10 +497,10 @@ export default function App() {
     }
   }, [activeBlockId]);
 
-  // Pré-carregar modelo LSTM em background ao montar o app
+  // PrÃ©-carregar modelo LSTM em background ao montar o app
   useEffect(() => { warmUpModel(); }, []);
 
-  // ── Acompanhamento ao Vivo (PoC) ──────────────────────
+  // â”€â”€ Acompanhamento ao Vivo (PoC) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   const liveChordHistoryRef = useRef<string[]>([]);
   const lastChordTimeRef = useRef<number>(0);
   const lastPlayedChordRef = useRef<number[]>([]);
@@ -408,6 +510,17 @@ export default function App() {
   const lastPlayedChordNameRef = useRef<string | null>(null);
   const chordCooldownRef = useRef<number>(0);
   const silenceStartRef = useRef<number | null>(null);
+  const liveNoteRef = useRef<string>("");
+  const lastChordChangeTimeRef = useRef<number>(0);
+  const lastPadRetriggerTimeRef = useRef<number>(0);
+  const liveMelodyHistoryRef = useRef<number[]>([]);
+
+  const [debugLog, setDebugLog] = useState<string>("Idle");
+
+  // Manter a ref sempre sincronizada com a string state mais recente
+  useEffect(() => {
+    liveNoteRef.current = pitchDetector.currentNote;
+  }, [pitchDetector.currentNote]);
 
   // useEffect apenas para iniciar/parar o polling
   useEffect(() => {
@@ -421,15 +534,129 @@ export default function App() {
       firedForCurrentPitchRef.current = false;
       lastPlayedChordNameRef.current = null;
       silenceStartRef.current = null;
+      lastChordChangeTimeRef.current = 0;
+      lastPadRetriggerTimeRef.current = 0;
+      liveMelodyHistoryRef.current = [];
+      setDebugLog("Stopped");
       return;
     }
 
-    // Polling ativo a cada 100ms — não depende de re-renders do React
-    const interval = setInterval(() => {
-      const noteName = pitchDetector.currentNote;
-      const now = performance.now();
+    setDebugLog("Polling started...");
 
-      // ── Silêncio ──
+    // Polling ativo a cada 100ms â€” nÃ£o depende de re-renders do React
+    const interval = setInterval(() => {
+      const now = performance.now();
+      const noteName = liveNoteRef.current;
+      const follower = scoreFollowerRef.current;
+      const score = activeScoreRef.current || activeScore;
+
+      // â”€â”€ MODO 1: Score Follower (MÃºsica de referÃªncia carregada) â”€â”€
+      if (follower && score) {
+        // Flywheel advance
+        let snapshot = follower.tick(now);
+
+        // â”€â”€ SilÃªncio â”€â”€
+        if (!noteName || noteName === "") {
+          if (!silenceStartRef.current) {
+            silenceStartRef.current = now;
+          } else if (now - silenceStartRef.current > 2000) {
+            // Se o silÃªncio for longo (2s+), relaxa o follower, mas NÃƒO para o som,
+            // permitindo que o pad continue sustentando a harmonia atÃ© a prÃ³xima nota.
+            follower.relax();
+          }
+          // NÃ£o dÃ¡ return aqui para permitir o retrigger do pad
+        } else {
+          silenceStartRef.current = null;
+          const pitchClassStr = noteName.replace(/[0-9-]/g, '');
+          if (pitchClassStr) {
+            if (pitchClassStr === lastPitchClassRef.current) {
+              stableCountRef.current++;
+            } else {
+              lastPitchClassRef.current = pitchClassStr;
+              stableCountRef.current = 1;
+              firedForCurrentPitchRef.current = false;
+            }
+
+            if (stableCountRef.current === 2 && !firedForCurrentPitchRef.current) {
+              firedForCurrentPitchRef.current = true; // We registered this onset
+              
+              const NOTE_NAMES = ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"];
+              const pcVal = NOTE_NAMES.indexOf(pitchClassStr);
+              if (pcVal !== -1) {
+                snapshot = follower.observeOnset(pcVal, now);
+              }
+            }
+          }
+        }
+
+        // Check chord change from follower
+        if (snapshot.chordIndex >= 0) {
+          const nextChord = score.chords[snapshot.chordIndex]?.symbol;
+          if (nextChord && nextChord !== lastPlayedChordNameRef.current) {
+            
+            setLiveChord(nextChord);
+            lastPlayedChordNameRef.current = nextChord;
+            
+            stopAll(true);
+            chordCooldownRef.current = now;
+            lastPadRetriggerTimeRef.current = now;
+            
+            const pcs = getChordPitchClasses(nextChord);
+            const newPitches = pcs.map(pc => 48 + pc);
+            lastPlayedChordRef.current = newPitches;
+            
+            setDebugLog(`TRACKING: ${nextChord} (Conf: ${snapshot.confidence.toFixed(2)})`);
+            
+            const chordObj = score.chords[snapshot.chordIndex];
+            const pattern = chordObj?.pattern;
+            const isPiano = chordsInstrument === "piano" || (chordsInstrument === "orchestra" && activeOrchestraInstruments.length === 0);
+
+            if (isPiano && pattern && pattern.length > 0) {
+              const beatSec = score.msPerBeat / 1000;
+              for (const n of pattern) {
+                // n.interval was stored relative to root in octave 3
+                const pitch = 48 + chordObj.root + n.interval;
+                playMIDINote(pitch, n.duration * beatSec, n.velocity, "piano", n.timeOffset * beatSec);
+              }
+            } else {
+              for (const p of newPitches) {
+                playMIDINote(p, 6, 0.8, chordsInstrument);
+              }
+            }
+          } else if (nextChord === lastPlayedChordNameRef.current && (now - lastPadRetriggerTimeRef.current > 2500)) {
+             // Retrigger contínuo (Seamless Pad Loop ou Arpejo contínuo)
+             lastPadRetriggerTimeRef.current = now;
+             const chordObj = score.chords[snapshot.chordIndex];
+             const pattern = chordObj?.pattern;
+             const isPiano = chordsInstrument === "piano" || (chordsInstrument === "orchestra" && activeOrchestraInstruments.length === 0);
+
+             if (isPiano && pattern && pattern.length > 0) {
+               setDebugLog(`Retrigger Arpeggio: ${lastPlayedChordNameRef.current}`);
+               const beatSec = score.msPerBeat / 1000;
+               for (const n of pattern) {
+                 const pitch = 48 + chordObj.root + n.interval;
+                 playMIDINote(pitch, n.duration * beatSec, n.velocity, "piano", n.timeOffset * beatSec);
+               }
+             } else if (lastPlayedChordRef.current && lastPlayedChordRef.current.length > 0) {
+               setDebugLog(`Retrigger Pad: ${lastPlayedChordNameRef.current}`);
+               for (const p of lastPlayedChordRef.current) {
+                 playMIDINote(p, 4, 0.6, chordsInstrument);
+               }
+             }
+          }
+        }
+        return; // Retorna para não cair no modo 2
+      }
+
+      // â”€â”€ MODO 2: GeraÃ§Ã£o Livre (DetermineNextChord) â”€â”€
+      
+      // CÃ¡lculo de duraÃ§Ã£o do compasso
+      const bpm = typeof preRecordBpm === "number" ? preRecordBpm : 0;
+      const measureDurationMs = bpm > 0 
+        ? (60000 / bpm) * (4 / preRecordTimeSignature.denominator) * preRecordTimeSignature.numerator
+        : 0;
+
+      // â”€â”€ SilÃªncio â”€â”€
       if (!noteName || noteName === "") {
         if (lastPlayedChordNameRef.current) {
           if (!silenceStartRef.current) {
@@ -442,6 +669,8 @@ export default function App() {
             firedForCurrentPitchRef.current = false;
             stableCountRef.current = 0;
             silenceStartRef.current = null;
+            lastChordChangeTimeRef.current = 0;
+            setDebugLog("Silence - stopped all");
           }
         }
         return;
@@ -456,55 +685,111 @@ export default function App() {
 
       if (pitchClass === lastPitchClassRef.current) {
         stableCountRef.current++;
+        setDebugLog(`Note: ${pitchClass} (Stable: ${stableCountRef.current})`);
       } else {
         lastPitchClassRef.current = pitchClass;
         stableCountRef.current = 1;
         firedForCurrentPitchRef.current = false;
+        
+        // Registrar a nova nota na melodia real (com oitava)
+        try {
+          const midiVal = Tone.Frequency(noteName).toMidi();
+          liveMelodyHistoryRef.current.push(midiVal);
+          if (liveMelodyHistoryRef.current.length > 8) {
+            liveMelodyHistoryRef.current.shift();
+          }
+        } catch (e) {
+          // ignora se parse falhar
+        }
+
+        setDebugLog(`Note changed to: ${pitchClass}`);
         return;
       }
 
-      if (firedForCurrentPitchRef.current) return;
+      if (firedForCurrentPitchRef.current) {
+        // Retrigger contÃ­nuo (Seamless Pad Loop)
+        if (now - lastPadRetriggerTimeRef.current > 2500) {
+          lastPadRetriggerTimeRef.current = now;
+          if (lastPlayedChordRef.current && lastPlayedChordRef.current.length > 0) {
+            setDebugLog(`Retrigger Pad: ${lastPlayedChordNameRef.current}`);
+            for (const p of lastPlayedChordRef.current) {
+              // Tocamos sem dar stopAll() para mesclar o som!
+              playMIDINote(p, 4, 0.6, chordsInstrument);
+            }
+          }
+        }
+        return;
+      }
+      
       if (stableCountRef.current < 2) return;
-      if (now - lastChordTimeRef.current < 400) return;
+
+      // â”€â”€ QuantizaÃ§Ã£o por Compasso â”€â”€
+      if (measureDurationMs > 0 && lastChordChangeTimeRef.current > 0) {
+        if (now - lastChordChangeTimeRef.current < measureDurationMs) {
+          // Ainda estamos dentro da duraÃ§Ã£o do compasso atual!
+          // Aguardamos atÃ© cruzar a fronteira do compasso para liberar a troca de acorde.
+          return;
+        }
+      }
 
       const NOTE_NAMES = ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"];
       const midi = NOTE_NAMES.indexOf(pitchClass);
       if (midi === -1) return;
       
-      const fakeNote: DetectedNote = { pitch: midi + 60, startTime: 0, endTime: 0.1, amplitude: 0.8 };
-      const result = determineNextChord(liveChordHistoryRef.current, [fakeNote], 0, 0.5, preRecordTemperature);
+      // Se nÃ£o houver histÃ³rico de melodia, usa a fake note
+      let melodyNotesToPass: DetectedNote[] = [];
+      if (liveMelodyHistoryRef.current.length === 0) {
+        melodyNotesToPass = [{ pitch: midi + 60, startTime: 0, endTime: 0.1, amplitude: 0.8 }];
+      } else {
+        melodyNotesToPass = liveMelodyHistoryRef.current.map((p, idx) => ({
+          pitch: p,
+          startTime: idx * 0.5,
+          endTime: (idx + 1) * 0.5,
+          amplitude: 0.8
+        }));
+      }
       
-      if (result.chord) {
-        if (result.chord === lastPlayedChordNameRef.current) {
-          firedForCurrentPitchRef.current = true;
-          return;
-        }
+      try {
+        const result = determineNextChord(liveChordHistoryRef.current, melodyNotesToPass, 0, 0.5, preRecordTemperature, preRecordTonality);
+        if (result.chord) {
+          if (result.chord === lastPlayedChordNameRef.current) {
+            firedForCurrentPitchRef.current = true;
+            return;
+          }
 
-        firedForCurrentPitchRef.current = true;
-        lastChordTimeRef.current = now;
-        liveChordHistoryRef.current.push(result.chord);
-        if (liveChordHistoryRef.current.length > 8) liveChordHistoryRef.current.shift();
-        
-        setLiveChord(result.chord);
-        lastPlayedChordNameRef.current = result.chord;
-        
-        stopAll();
-        chordCooldownRef.current = now;
-        
-        const pcs = getChordPitchClasses(result.chord);
-        const newPitches = pcs.map(pc => 48 + pc);
-        lastPlayedChordRef.current = newPitches;
-        
-        for (const p of newPitches) {
-          playMIDINote(p, 6, 0.8, chordsInstrument);
+          firedForCurrentPitchRef.current = true;
+          lastChordChangeTimeRef.current = now;
+          lastPadRetriggerTimeRef.current = now;
+          liveChordHistoryRef.current.push(result.chord);
+          if (liveChordHistoryRef.current.length > 8) liveChordHistoryRef.current.shift();
+          
+          setLiveChord(result.chord);
+          lastPlayedChordNameRef.current = result.chord;
+          
+          stopAll(true);
+          chordCooldownRef.current = now;
+          
+          const pcs = getChordPitchClasses(result.chord);
+          const newPitches = pcs.map(pc => 48 + pc);
+          lastPlayedChordRef.current = newPitches;
+          
+          setDebugLog(`TRIGGER CHORD: ${result.chord} -> Pitches: ${newPitches.join(',')}`);
+          
+          for (const p of newPitches) {
+            playMIDINote(p, 6, 0.8, chordsInstrument);
+          }
+        } else {
+          setDebugLog(`DetermineNextChord returned null! weights exist?`);
         }
+      } catch(e) {
+        setDebugLog(`Error in determineNextChord: ${(e as Error).message}`);
       }
     }, 100);
 
     return () => clearInterval(interval);
-  }, [appState, pitchDetector.isListening]);
+  }, [appState, pitchDetector.isListening, playMIDINote, chordsInstrument, stopAll]);
 
-  // ── Cleanup ao desmontar ──────────────────────────────
+  // â”€â”€ Cleanup ao desmontar â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   useEffect(() => {
     return () => {
       if (pitchDetector.isListening) pitchDetector.stopListening();
@@ -513,7 +798,7 @@ export default function App() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // ── Controle de Playback por item ─────────────────────
+  // â”€â”€ Controle de Playback por item â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   const playSequence = useCallback(async (index: number, seq: INoteSequence, offset: number = 0, melodyInst: InstrumentType = "piano", chordsInst: InstrumentType = "piano") => {
     try {
       if (playingIndexRef.current === index) {
@@ -531,7 +816,7 @@ export default function App() {
 
       await stringEngine.playSequence(seq, offset, melodyInst, chordsInst);
 
-      // Calcular a duração aproximada para liberar o botão
+      // Calcular a duraÃ§Ã£o aproximada para liberar o botÃ£o
       const totalDuration = seq.notes?.reduce((max, note) => Math.max(max, note.endTime || 0), 0) || 0;
       setTimeout(() => {
         if (playingIndexRef.current === index) {
@@ -547,7 +832,165 @@ export default function App() {
     }
   }, [stringEngine]);
 
-  // ── Ring Click (Cancelar ou Iniciar) ──────────────────
+  const handleLoadMidi = useCallback(async (url: string, title: string, id: string, customManifest?: SongManifest) => {
+    try {
+      const res = await fetch(url);
+      const buffer = await res.arrayBuffer();
+      const parsedMidi = new Midi(buffer);
+      console.log("[MIDI Load ToneJS]", title, parsedMidi);
+      
+      let manifest = customManifest || SHOWCASE_SONGS.find(s => s.id === id);
+      if (!manifest) {
+        console.error("Song manifest not found for id:", id);
+        return;
+      }
+
+      // If it's a completely new file with no predefined manifest, infer missing fields
+      if (!manifest.bpm) {
+        manifest = { ...manifest, bpm: parsedMidi.header.tempos.length > 0 ? parsedMidi.header.tempos[0].bpm : 120 };
+      }
+      if (!manifest.meter || !manifest.meter.numerator) {
+        const ts = parsedMidi.header.timeSignatures.length > 0 ? parsedMidi.header.timeSignatures[0] : null;
+        manifest = { ...manifest, meter: ts ? { numerator: ts.timeSignature[0], denominator: ts.timeSignature[1] } : { numerator: 4, denominator: 4 } };
+      }
+
+      if (!manifest.key || manifest.key === "AUTO") {
+        const detected = detectMidiKey(parsedMidi as any);
+        console.log("[Key Detection]", detected);
+        manifest = { ...manifest, key: detected?.key ?? "C" };
+      }
+
+      const sessionTitle = title;
+      try {
+        const { session } = await apiCreateSession(sessionTitle);
+        rememberSessionManifest(session.id, manifest);
+        handleSessionChange(session);
+      } catch (e) {
+        console.warn("Failed to create session for MIDI, continuing locally:", e);
+      }
+
+      const score = buildSongScore(parsedMidi as any, manifest);
+      setActiveScore(score);
+      setActiveManifest(manifest);
+      if (manifest.id.startsWith("custom-")) {
+        // Keep the draft in sync with inferred BPM/meter so publishing saves the real config
+        setDraftManifest(prev => (prev && prev.id === manifest!.id ? manifest! : prev));
+      }
+      scoreFollowerRef.current = new ScoreFollower(score);
+
+      const bpm = manifest.bpm;
+      const num = manifest.meter.numerator;
+      const den = manifest.meter.denominator;
+
+      const nsNotes: NoteSequence.INote[] = [];
+      parsedMidi.tracks.forEach(track => {
+        track.notes.forEach(note => {
+          nsNotes.push(NoteSequence.Note.create({
+            pitch: note.midi,
+            startTime: note.time,
+            endTime: note.time + note.duration,
+            velocity: Math.floor(note.velocity * 127),
+          }));
+        });
+      });
+
+      const stepsPerSecond = sequences.stepsPerQuarterToStepsPerSecond(4, bpm);
+      nsNotes.forEach(n => {
+        if (n.startTime !== undefined && n.endTime !== undefined) {
+          n.quantizedStartStep = Math.round(n.startTime * stepsPerSecond);
+          n.quantizedEndStep = Math.max(n.quantizedStartStep + 1, Math.round(n.endTime * stepsPerSecond));
+        }
+      });
+
+      const ns = NoteSequence.create({
+        notes: nsNotes,
+        tempos: [{ time: 0, qpm: bpm }],
+        totalQuantizedSteps: Math.max(...nsNotes.map(n => n.quantizedEndStep || 0)),
+      });
+
+      const extractedProgression = scoreToChordSegments(score);
+
+      const midiBlock: CompositionBlock = {
+        id: Date.now().toString(),
+        name: "Blueprint (MIDI)",
+        notes: [],
+        progression: extractedProgression,
+        key: manifest.key,
+        bpm: bpm,
+        timeSignature: `${num}/${den}`,
+        noteSequence: ns,
+        newlyGenerated: true
+      };
+
+      setBlocks([midiBlock]);
+      setActiveBlockId(midiBlock.id);
+      
+      setPreRecordTimeSignature({ numerator: num, denominator: den });
+      setPreRecordBpm(bpm);
+      setPreRecordTonality(manifest.key);
+
+      setActiveTab("vibe");
+      
+    } catch (err) {
+      console.error("Failed to load MIDI:", err);
+    }
+  }, [handleSessionChange, rememberSessionManifest]);
+
+  const handleDropMidi = useCallback((e: React.DragEvent<HTMLDivElement>) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setIsDragActive(false);
+
+    if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
+      const file = e.dataTransfer.files[0];
+      if (/\.midi?$/i.test(file.name)) {
+        const title = file.name.replace(/\.midi?$/i, '');
+        const tempId = `custom-${Date.now()}`;
+
+        // Data URL (not blob URL) so the MIDI survives reloads in localStorage
+        const reader = new FileReader();
+        reader.onload = () => {
+          const url = reader.result as string;
+          const tempManifest: SongManifest = {
+            id: tempId,
+            title: title,
+            artist: "M\u00fasico Customizado",
+            midiUrl: url,
+            coverUrl: "https://images.unsplash.com/photo-1511671782779-c97d3d27a1d4?auto=format&fit=crop&q=80&w=400",
+            key: "AUTO", // detected from the MIDI in handleLoadMidi
+            meter: { numerator: 0, denominator: 0 }, // inferred from MIDI in handleLoadMidi
+            lockMeter: true,
+            bpm: 0, // inferred from MIDI in handleLoadMidi
+            midiBeatInQuarters: 1,
+          };
+
+          setDraftManifest(tempManifest);
+          setActiveManifest(tempManifest);
+          handleLoadMidi(url, title, tempId, tempManifest);
+        };
+        reader.readAsDataURL(file);
+      }
+    }
+  }, [handleLoadMidi]);
+
+  const handleDragOver = useCallback((e: React.DragEvent<HTMLDivElement>) => {
+    e.preventDefault();
+    e.stopPropagation();
+  }, []);
+
+  const handleDragEnter = useCallback((e: React.DragEvent<HTMLDivElement>) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setIsDragActive(true);
+  }, []);
+
+  const handleDragLeave = useCallback((e: React.DragEvent<HTMLDivElement>) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setIsDragActive(false);
+  }, []);
+
+  // â”€â”€ Ring Click (Cancelar ou Iniciar) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   const handleRingClick = useCallback(async () => {
     if (appState === "RECORDING") {
       await pitchDetector.pauseListening();
@@ -556,36 +999,47 @@ export default function App() {
       pitchDetector.cancelListening();
       setAppState("IDLE");
     } else if (appState === "IDLE") {
-      // Iniciar pelo anel também é válido
-      // Mas para manter as regras de UI, usaremos o handleMainButtonClick
+      // Iniciar captaÃ§Ã£o
+      setBlocks(prev => prev.map(b => 
+        b.id === activeBlockId ? { ...b, notes: [], progression: [], noteSequence: undefined, newlyGenerated: false } : b
+      ));
+      setActiveTab("vibe");
+      
+      setAppState("RECORDING");
+      await pitchDetector.prepareListening();
+      pitchDetector.startRecording();
     }
-  }, [appState, pitchDetector]);
+  }, [appState, pitchDetector, activeBlockId]);
 
-  // ── Handler principal do botão ────────────────────────
+  // â”€â”€ Handler principal do botÃ£o â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   const handleMainButtonClick = useCallback(async () => {
     const current = appStateRef.current;
     setErrorMsg(null);
 
     switch (current) {
-      // ── IDLE → RECORDING ───────────────────────────────
+      // â”€â”€ IDLE â†’ RECORDING â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
       case "IDLE": {
         setAppState("RECORDING");
-        await pitchDetector.prepareListening(); // Prepara mic (pede permissão)
+        // O WebView2 / Navegador exige destravamento explÃ­cito via interaÃ§Ã£o de clique
+        if (Tone.context.state !== "running") {
+          await Tone.start();
+        }
+        await pitchDetector.prepareListening(); // Prepara mic (pede permissÃ£o)
         pitchDetector.startRecording(); // Inicia imediatamente
         break;
       }
 
-      // ── RECORDING → (agora é capturado pelo anel, mas deixamos vazio por segurança)
+      // â”€â”€ RECORDING â†’ (agora Ã© capturado pelo anel, mas deixamos vazio por seguranÃ§a)
       case "RECORDING":
         break;
 
-      // ── REVIEW_RECORDING → PROCESSING → PLAYING_AND_SHOWING ─
+      // â”€â”€ REVIEW_RECORDING â†’ PROCESSING â†’ PLAYING_AND_SHOWING â”€
       case "REVIEW_RECORDING": {
         await processRecording();
         break;
       }
 
-      // COUNT_IN e PROCESSING: não fazem nada no clique
+      // COUNT_IN e PROCESSING: nÃ£o fazem nada no clique
       default:
         break;
     }
@@ -597,7 +1051,7 @@ export default function App() {
         // Yield inicial para garantir a montagem do componente ProcessingText na UI
         await new Promise(resolve => setTimeout(resolve, 50));
 
-        // 2) A rede neural do Basic Pitch avalia o áudio (demora alguns segundos)
+        // 2) A rede neural do Basic Pitch avalia o Ã¡udio (demora alguns segundos)
         const detectedNotes = await pitchDetector.processPausedAudio();
 
         if (detectedNotes.length === 0) {
@@ -610,7 +1064,7 @@ export default function App() {
           // Yield para liberar a UI antes do processamento intensivo
           await new Promise(resolve => setTimeout(resolve, 50));
 
-          // 3) Pré-processar notas e remover o silêncio inicial (trim)
+          // 3) PrÃ©-processar notas e remover o silÃªncio inicial (trim)
           let gluedNotes = glueNotes(detectedNotes);
           
           if (gluedNotes.length > 0) {
@@ -621,10 +1075,10 @@ export default function App() {
               endTime: n.endTime - tMin,
             }));
             const tMax = Math.max(...gluedNotes.map(n => n.endTime));
-            console.log(`[Pipeline] Range temporal ajustado (sem folga inicial): 0.000s → ${tMax.toFixed(3)}s`);
+            console.log(`[Pipeline] Range temporal ajustado (sem folga inicial): 0.000s â†’ ${tMax.toFixed(3)}s`);
           }
 
-          // Yield antes de algoritmos custosos de análise harmônica
+          // Yield antes de algoritmos custosos de anÃ¡lise harmÃ´nica
           await new Promise(resolve => setTimeout(resolve, 50));
 
           // 4) Analisar Key e BPM
@@ -639,7 +1093,7 @@ export default function App() {
           setUtValue(preRecordTimeSignature.denominator);
           recordedBpmRef.current = estimatedBpm;
 
-          console.log(`[Pipeline] Notas brutas: ${detectedNotes.length} → Após glue: ${gluedNotes.length}`);
+          console.log(`[Pipeline] Notas brutas: ${detectedNotes.length} â†’ ApÃ³s glue: ${gluedNotes.length}`);
           console.log(`[Pipeline] Key detectada: ${detectedKey} | BPM estimado: ${estimatedBpm}`);
 
           // 5) Normalizar notas para C Major (Local Space) usando a tonalidade detectada
@@ -648,7 +1102,7 @@ export default function App() {
           // Yield antes de consultar a matriz de Markov e iterar no grafo
           await new Promise(resolve => setTimeout(resolve, 50));
 
-          // 6) Gerar progressão via HarmonyEngine Neural LSTM (opera em C Major)
+          // 6) Gerar progressÃ£o via HarmonyEngine Neural LSTM (opera em C Major)
           const rawProgression = await generateProgression(
             normalizedNotes,
             estimatedBpm,
@@ -658,9 +1112,9 @@ export default function App() {
             "C",
           );
 
-          console.log(`[Pipeline] Progressão bruta (C): [${rawProgression.join(", ")}]`);
+          console.log(`[Pipeline] ProgressÃ£o bruta (C): [${rawProgression.join(", ")}]`);
 
-          // 7) Transpor progressão de volta para a tonalidade detectada
+          // 7) Transpor progressÃ£o de volta para a tonalidade detectada
           const transposedProgression = rawProgression.map(item => ({
             chord: transposeProgression([item.chord], detectedKey)[0],
             velocity: item.velocity
@@ -673,9 +1127,9 @@ export default function App() {
             velocity: item.velocity
           }));
 
-          console.log(`[Pipeline] Progressão final (${tonality}): [${progression.map(p => p.chord).join(", ")}]`);
+          console.log(`[Pipeline] ProgressÃ£o final (${tonality}): [${progression.map(p => p.chord).join(", ")}]`);
 
-          // Yield antes da síntese final de NoteSequence
+          // Yield antes da sÃ­ntese final de NoteSequence
           await new Promise(resolve => setTimeout(resolve, 50));
 
           // 8) Sintetizar em NoteSequence (melodia + acordes)
@@ -707,15 +1161,15 @@ export default function App() {
           });
           setAppState("IDLE");
 
-          // 10) Persistir no backend — cria sessão se não houver uma ativa
+          // 10) Persistir no backend â€” cria sessÃ£o se nÃ£o houver uma ativa
           setTimeout(async () => {
             try {
               let session = activeSessionRef.current;
               if (!session) {
-                // Gera título musical único: "Am · Dm – G – C · 19:31"
+                // Gera tÃ­tulo musical Ãºnico: "Am Â· Dm â€“ G â€“ C Â· 19:31"
                 const timeStr = new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
-                const chordPreview = progression.map(p => p.chord).slice(0, 3).join(' – ');
-                const sessionTitle = `${detectedKey} · ${chordPreview} · ${timeStr}`;
+                const chordPreview = progression.map(p => p.chord).slice(0, 3).join(' â€“ ');
+                const sessionTitle = `${detectedKey} Â· ${chordPreview} Â· ${timeStr}`;
 
                 const { session: newSession } = await apiCreateSession(sessionTitle);
                 session = newSession;
@@ -734,9 +1188,9 @@ export default function App() {
               }));
 
               await apiSaveComposition(session.id, serialized);
-              console.log('[Requiem] Composição salva na sessão', session.id);
+              console.log('[Requiem] ComposiÃ§Ã£o salva na sessÃ£o', session.id);
             } catch (saveErr) {
-              console.warn('[Requiem] Não foi possível salvar no backend:', saveErr);
+              console.warn('[Requiem] NÃ£o foi possÃ­vel salvar no backend:', saveErr);
             }
           }, 0);
 
@@ -755,7 +1209,7 @@ export default function App() {
     await processRecording();
   };
 
-  // ── Atualizar Progressão ───────────────────────────────
+  // â”€â”€ Atualizar ProgressÃ£o â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   const handleUpdateProgression = useCallback((newProgression: ChordSegment[]) => {
     let updatedBlocks: CompositionBlock[] = [];
     setBlocks(prev => {
@@ -770,7 +1224,7 @@ export default function App() {
           );
           return { ...b, progression: newProgression, noteSequence, newlyGenerated: true };
         } catch (err) {
-          console.error("Erro ao atualizar progressão:", err);
+          console.error("Erro ao atualizar progressÃ£o:", err);
           return b;
         }
       });
@@ -780,7 +1234,7 @@ export default function App() {
     
     // Reiniciar player se estiver tocando
     if (playingIndexRef.current === 0) {
-       stringEngine.stop();
+       stopAll();
        setPlayingIndex(null);
        playingIndexRef.current = null;
     }
@@ -801,29 +1255,23 @@ export default function App() {
         }));
         await apiSaveComposition(session.id, serialized);
       } catch (e) {
-        console.warn('[Requiem] Auto-save progressão falhou:', e);
+        console.warn('[Requiem] Auto-save progressÃ£o falhou:', e);
       }
     }, 0);
   }, [bpm, utValue, activeBlockId, stringEngine]);
 
   // O efeito colateral reativo de BPM foi removido para evitar estiramentos cumulativos da melodia.
 
-  // ── Derivações visuais ────────────────────────────────
+  // â”€â”€ DerivaÃ§Ãµes visuais â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   const isActive = appState !== "IDLE";
   const isRecording = appState === "RECORDING";
   const isProcessing = appState === "PROCESSING";
   const isButtonDisabled = isProcessing || !isReady;
 
-  // Auto-switch to Studio when result is generated
-  useEffect(() => {
-    if (activeBlock?.noteSequence && activeTab === "vibe") {
-      setActiveTab("studio");
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [activeBlock?.noteSequence]);
+  // Auto-switch to Studio removed to prioritize live accompaniment
 
   const handleStartRecording = useCallback(async () => {
-    // Apaga apenas o bloco ativo para regravar do zero e remove a flag de animação
+    // Apaga apenas o bloco ativo para regravar do zero e remove a flag de animaÃ§Ã£o
     setBlocks(prev => prev.map(b => 
       b.id === activeBlockId ? { ...b, notes: [], progression: [], noteSequence: undefined, newlyGenerated: false } : b
     ));
@@ -840,7 +1288,7 @@ export default function App() {
     const id = Date.now().toString();
     const newBlock: CompositionBlock = {
       id,
-      name: `Seção ${blocks.length + 1}`,
+      name: `SeÃ§Ã£o ${blocks.length + 1}`,
       notes: [],
       progression: [],
       key: "C",
@@ -854,11 +1302,11 @@ export default function App() {
   const handleRemoveBlock = useCallback((idToRemove: string) => {
     setBlocks(prev => {
       const next = prev.filter(b => b.id !== idToRemove);
-      // Se apagar o ativo, ativa o primeiro disponível (se houver)
+      // Se apagar o ativo, ativa o primeiro disponÃ­vel (se houver)
       if (idToRemove === activeBlockId && next.length > 0) {
         setActiveBlockId(next[0].id);
       }
-      return next.length > 0 ? next : [{ id: Date.now().toString(), name: "Seção 1", notes: [], progression: [], key: "C", bpm: 120, timeSignature: `${preRecordTimeSignature.numerator}/${preRecordTimeSignature.denominator}` }];
+      return next.length > 0 ? next : [{ id: Date.now().toString(), name: "SeÃ§Ã£o 1", notes: [], progression: [], key: "C", bpm: 120, timeSignature: `${preRecordTimeSignature.numerator}/${preRecordTimeSignature.denominator}` }];
     });
   }, [activeBlockId, preRecordTimeSignature]);
 
@@ -866,7 +1314,7 @@ export default function App() {
     setBlocks(prev => prev.map(b => b.id === id ? { ...b, name: newName } : b));
   }, []);
 
-  // Setters que também atualizam o bloco atual
+  // Setters que tambÃ©m atualizam o bloco atual
   const handleSetBpm = useCallback((newBpm: number) => {
     setBlocks(prev => {
       const nextBlocks = prev.map(b => {
@@ -894,7 +1342,7 @@ export default function App() {
         }
       });
       
-      // Auto-save no backend após escalar a melodia
+      // Auto-save no backend apÃ³s escalar a melodia
       setTimeout(async () => {
         const session = activeSessionRef.current;
         if (!session) return;
@@ -921,11 +1369,11 @@ export default function App() {
     recordedBpmRef.current = newBpm;
     
     if (playingIndexRef.current === 0) {
-       stringEngine.stop();
+       stopAll();
        setPlayingIndex(null);
        playingIndexRef.current = null;
     }
-  }, [activeBlockId, stringEngine]);
+  }, [activeBlockId, stopAll]);
 
   const handleSetQtValue = useCallback((newQt: number) => {
     setQtValue(newQt);
@@ -939,34 +1387,103 @@ export default function App() {
 
   const handleSetTonality = useCallback((newKey: string) => {
     setTonality(newKey);
-    setBlocks(prev => prev.map(b => {
-      if (b.id !== activeBlockId) return b;
-      
-      try {
-        const cProgression = normalizeProgressionToC(b.progression.map(p => p.chord), b.key);
-        const newProgressionStr = transposeProgression(cProgression, newKey);
-        const newProgression = b.progression.map((p, i) => ({ ...p, chord: newProgressionStr[i] }));
-        
-        const [, ut] = b.timeSignature.split('/');
-        const noteSequence = progressionToNoteSequence(
-          newProgression,
-          b.notes,
-          b.bpm,
-          parseInt(ut) || 4
-        );
-        
-        return { ...b, key: newKey, progression: newProgression, noteSequence };
-      } catch (err) {
-        console.error("Erro ao transpor tonalidade:", err);
-        return { ...b, key: newKey }; // Fallback
+    setPreRecordTonality(newKey);
+
+    // Stop currently sounding notes so nothing hangs in the previous key
+    stopAll(true);
+    lastPlayedChordNameRef.current = null;
+    lastPlayedChordRef.current = [];
+
+    // ── CASE 1: If there is an active MIDI reference score loaded ──
+    const currentScore = activeScoreRef.current;
+    if (currentScore) {
+      const targetKey = newKey === "AUTO"
+        ? (currentScore.originalKey && currentScore.originalKey !== "AUTO" ? currentScore.originalKey : "C")
+        : newKey;
+
+      const semitones = getSemitoneDifference(currentScore.key, targetKey);
+
+      if (semitones !== 0 || currentScore.key !== targetKey) {
+        const transposedScore = transposeSongScore(currentScore, semitones, targetKey);
+        setActiveScore(transposedScore);
+        activeScoreRef.current = transposedScore;
+        scoreFollowerRef.current = new ScoreFollower(transposedScore);
+        console.log(`[Tonality Change] Transposed MIDI from ${currentScore.key} to ${targetKey} (${semitones > 0 ? '+' : ''}${semitones} semitones)`);
+
+        if (activeManifest) {
+          const updatedManifest = { ...activeManifest, key: targetKey };
+          setActiveManifest(updatedManifest);
+          if (activeSessionRef.current) {
+            rememberSessionManifest(activeSessionRef.current.id, updatedManifest);
+          }
+          if (updatedManifest.id.startsWith("custom-")) {
+            setDraftManifest(prev => (prev && prev.id === updatedManifest.id ? updatedManifest : prev));
+          }
+        }
+
+        const newProgression = scoreToChordSegments(transposedScore);
+
+        setBlocks(prev => prev.map(b => {
+          if (b.id !== activeBlockId && !b.name.includes("MIDI") && !b.progression.length) return b;
+
+          let newNs = b.noteSequence;
+          if (newNs && newNs.notes && newNs.notes.length > 0 && semitones !== 0) {
+            const transposedNotes = newNs.notes.map(n => ({
+              ...n,
+              pitch: Math.max(0, Math.min(127, (n.pitch ?? 60) + semitones)),
+            }));
+            newNs = NoteSequence.create({
+              ...newNs,
+              notes: transposedNotes,
+            });
+          }
+
+          return {
+            ...b,
+            key: targetKey,
+            progression: newProgression,
+            noteSequence: newNs,
+          };
+        }));
       }
-    }));
-  }, [activeBlockId]);
+      return;
+    }
+
+    // ── CASE 2: No MIDI score, but standard composition blocks ──
+    if (newKey !== "AUTO") {
+      setBlocks(prev => prev.map(b => {
+        if (b.id !== activeBlockId) return b;
+        
+        try {
+          if (b.notes.length > 0) {
+            const cProgression = normalizeProgressionToC(b.progression.map(p => p.chord), b.key);
+            const newProgressionStr = transposeProgression(cProgression, newKey);
+            const newProgression = b.progression.map((p, i) => ({ ...p, chord: newProgressionStr[i] }));
+            
+            const [, ut] = b.timeSignature.split('/');
+            const noteSequence = progressionToNoteSequence(
+              newProgression,
+              b.notes,
+              b.bpm,
+              parseInt(ut) || 4
+            );
+            
+            return { ...b, key: newKey, progression: newProgression, noteSequence };
+          } else {
+            return { ...b, key: newKey };
+          }
+        } catch (err) {
+          console.error("Erro ao transpor tonalidade:", err);
+          return { ...b, key: newKey };
+        }
+      }));
+    }
+  }, [activeBlockId, activeManifest, rememberSessionManifest, stopAll]);
 
   return (
     <div className="flex h-screen w-full bg-black text-white overflow-hidden font-sans antialiased">
 
-      {/* ─── SIDEBAR (Present on all views) ─── */}
+      {/* â”€â”€â”€ SIDEBAR (Present on all views) â”€â”€â”€ */}
       <Sidebar
         isSidebarOpen={isSidebarOpen}
         setIsSidebarOpen={setIsSidebarOpen}
@@ -974,32 +1491,96 @@ export default function App() {
         onSessionChange={handleSessionChange}
         onSessionRename={handleSessionRename}
         activeSession={activeSession}
-        onSearchClick={() => setActiveTab("vibe")}
+        onSearchClick={() => setIsSearchOpen(true)}
+        onShowcaseClick={() => setIsShowcaseOpen(true)}
       />
 
-      {/* ─── VIBE VIEW ─── */}
+      {isSearchOpen && (
+        <SearchScreen 
+          onClose={() => setIsSearchOpen(false)}
+          onSessionSelect={(session) => {
+            handleSessionChange(session);
+            setIsSearchOpen(false);
+          }}
+        />
+      )}
+
+      {isShowcaseOpen && (
+        <ShowcaseScreen
+          onClose={() => setIsShowcaseOpen(false)}
+          onLoadMidi={handleLoadMidi}
+          customSongs={customSongs}
+        />
+      )}
+
+      {/* â”€â”€â”€ VIBE VIEW â”€â”€â”€ */}
       {activeTab === "vibe" && (
         <main className="relative flex-1 flex flex-col justify-between p-8 overflow-hidden bg-black">
+
+          {draftManifest && (
+            <div className="absolute top-6 right-20 z-50 animate-fade-in group">
+              <button 
+                onClick={() => {
+                  const toPublish = activeManifest && activeManifest.id === draftManifest.id ? activeManifest : draftManifest;
+                  setCustomSongs(prev => [...prev.filter(s => s.id !== toPublish.id), toPublish]);
+                  setDraftManifest(null);
+                }}
+                className="bg-white/10 hover:bg-white/20 text-white p-3 rounded-full transition-all border border-white/20"
+                aria-label="Publicar músico"
+              >
+                <Upload className="w-5 h-5" />
+              </button>
+              <div className="absolute -bottom-8 left-1/2 -translate-x-1/2 opacity-0 group-hover:opacity-100 bg-black/80 px-2 py-1 rounded text-xs whitespace-nowrap transition-opacity pointer-events-none border border-white/10">
+                Publicar músico
+              </div>
+            </div>
+          )}
 
           {/* Unified Animated/Static Stars Background */}
           <Starfield animated={appState === "PROCESSING"} numStars={250} />
 
           {/* Corpo Central */}
           <div className="relative z-10 flex flex-col flex-1 items-center justify-center text-center overflow-hidden">
+            <div className="fixed top-0 left-0 p-4 bg-black/80 text-xs font-mono text-green-400 z-50 text-left whitespace-pre">
+              AudioContext: {Tone.context.state}{"\n"}
+              Mic Status: {pitchDetector.isListening ? "Listening" : "Off"} | AppState: {appState}{"\n"}
+              Loaded: {activeOrchestraInstruments.join(", ") || "None"}{"\n"}
+              Raw Note: {pitchDetector.currentNote || "SILENCE"}{"\n"}
+              State Log: {debugLog}
+              
+              <button 
+                className="mt-2 bg-white text-black px-2 py-1 rounded block"
+                onClick={async () => {
+                  await Tone.start();
+                  // Teste do playMIDINote
+                  playMIDINote(60, 1, 1, "orchestra");
+                }}
+              >
+                TEST SOUND
+              </button>
+            </div>
+            
             <div className="w-full max-w-4xl px-4 flex flex-col items-center transition-all duration-500 ease-in-out">
 
-              <div className="relative flex items-center justify-center">
+              <div className={`relative flex items-center justify-center transition-all duration-500 ease-in-out ${isArrangerOpen ? 'opacity-0 scale-95 pointer-events-none' : 'opacity-100 scale-100'}`}>
                 <DynamicRing 
                   isActive={isActive} 
                   currentFrequency={pitchDetector.currentFrequency}
                   currentNote={liveChord || pitchDetector.currentNote}
                   onClick={handleRingClick}
+                  onDrop={handleDropMidi}
+                  onDragOver={handleDragOver}
+                  onDragEnter={handleDragEnter}
+                  onDragLeave={handleDragLeave}
+                  isDragActive={isDragActive}
                 />
               </div>
 
               <div className={`w-full flex flex-col items-center transition-all duration-700 ease-[cubic-bezier(0.34,1.56,0.64,1)] ${isActive ? 'opacity-0 h-0 scale-90 pointer-events-none' : 'opacity-100 h-auto scale-100'}`}>
-                <h1 className="text-3xl sm:text-4xl font-normal tracking-tight text-white/90 mb-10 drop-shadow-md">
-                  Olá! O que vamos tocar hoje?
+                <h1 className={`text-3xl sm:text-4xl font-normal tracking-tight text-white/90 mb-10 drop-shadow-md transition-all duration-500 ease-in-out ${isArrangerOpen ? 'opacity-0 translate-y-[-10px] pointer-events-none' : 'opacity-100 translate-y-0'}`}>
+                  {activeManifest
+                    ? (activeManifest.id.startsWith("custom-") ? activeManifest.title : `${activeManifest.artist} - ${activeManifest.title}`)
+                    : "Improviso Livre"}
                 </h1>
 
                 <RecordControls
@@ -1008,20 +1589,21 @@ export default function App() {
                   isProcessing={isProcessing}
                   currentFrequency={pitchDetector.currentFrequency}
                   currentNote={pitchDetector.currentNote}
-                  isButtonDisabled={isButtonDisabled}
-                  handleMainButtonClick={handleMainButtonClick}
                   stateLabels={STATE_LABELS}
                   preRecordTimeSignature={preRecordTimeSignature}
                   setPreRecordTimeSignature={setPreRecordTimeSignature}
                   preRecordBpm={preRecordBpm}
                   setPreRecordBpm={setPreRecordBpm}
                   preRecordTonality={preRecordTonality}
-                  setPreRecordTonality={setPreRecordTonality}
+                  setPreRecordTonality={handleSetTonality}
                   preRecordTemperature={preRecordTemperature}
                   setPreRecordTemperature={setPreRecordTemperature}
                   loadOrchestraInstrument={loadOrchestraInstrument}
                   unloadOrchestraInstrument={unloadOrchestraInstrument}
                   activeOrchestraInstruments={activeOrchestraInstruments}
+                  onArrangerOpenChange={setIsArrangerOpen}
+                  chordsInstrument={chordsInstrument}
+                  setChordsInstrument={setChordsInstrument}
                 />
             </div>
             
@@ -1063,16 +1645,16 @@ export default function App() {
         </main>
       )}
 
-      {/* ─── STUDIO VIEW ─── */}
+      {/* â”€â”€â”€ STUDIO VIEW â”€â”€â”€ */}
       {activeTab === "studio" && activeBlock && (
         <main className="flex-1 flex flex-col overflow-hidden">
           <StudioView
-            compositionName={activeSession?.title || "Nova Composição"}
+            compositionName={activeSession?.title || "Novo mÃºsico"}
             blocks={blocks}
             activeBlockId={activeBlockId}
             onActiveBlockChange={(id) => {
             setActiveBlockId(id);
-            // Ao trocar de bloco manualmente, remova a flag newlyGenerated do bloco novo (se houver) para não re-animar
+            // Ao trocar de bloco manualmente, remova a flag newlyGenerated do bloco novo (se houver) para nÃ£o re-animar
             setBlocks(prev => prev.map(b => b.id === id && b.newlyGenerated ? { ...b, newlyGenerated: false } : b));
           }}
           onAddBlock={handleAddBlock}
@@ -1096,7 +1678,7 @@ export default function App() {
               if (activeBlock.noteSequence) playSequence(0, activeBlock.noteSequence, timeOffset, melodyInstrument, chordsInstrument);
             }}
             onStop={() => {
-              stringEngine.stop();
+              stopAll();
               setPlayingIndex(null);
               playingIndexRef.current = null;
             }}
@@ -1105,11 +1687,13 @@ export default function App() {
             onReorderBlocks={setBlocks}
             selectedTrackIndex={selectedTrackIndex}
             onSelectTrack={setSelectedTrackIndex}
-            onPlayArrangement={() => stringEngine.playFullArrangement(blocks, melodyInstrument, chordsInstrument)}
-            melodyInstrument={melodyInstrument}
-            setMelodyInstrument={setMelodyInstrument}
-            chordsInstrument={chordsInstrument}
-            setChordsInstrument={setChordsInstrument}
+            onPlayArrangement={() => {
+              console.warn("Play full arrangement not implemented in UI layer yet");
+            }}
+            melodyInstrument={melodyInstrument as InstrumentType}
+            setMelodyInstrument={(val) => setMelodyInstrument(val as InstrumentType)}
+            chordsInstrument={chordsInstrument as InstrumentType | "orchestra"}
+            setChordsInstrument={(val) => setChordsInstrument(val as InstrumentType | "orchestra")}
             melodyVolume={melodyVolume}
             setMelodyVolume={setMelodyVolume}
             melodyMuted={melodyMuted}
@@ -1122,7 +1706,7 @@ export default function App() {
             preRecordBpm={preRecordBpm}
             setPreRecordBpm={setPreRecordBpm}
             preRecordTonality={preRecordTonality}
-            setPreRecordTonality={setPreRecordTonality}
+            setPreRecordTonality={handleSetTonality}
             preRecordTimeSignature={preRecordTimeSignature}
             setPreRecordTimeSignature={setPreRecordTimeSignature}
           />
@@ -1132,14 +1716,14 @@ export default function App() {
   );
 }
 
-// ─────────────────────────────────────────────────────────
+// â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 // Componente de Processamento (Terminal Log)
-// ─────────────────────────────────────────────────────────
+// â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 const PROCESSING_MESSAGES = [
-  "Preparando áudio gravado...",
+  "Preparando Ã¡udio gravado...",
   "Ouvindo as notas e detectando o tom...",
-  "Analisando padrões harmônicos...",
-  "Consultando banco de músicas para referências...",
+  "Analisando padrÃµes harmÃ´nicos...",
+  "Consultando banco de mÃºsicas para referÃªncias...",
   "Pensando nos melhores acordes...",
   "Mapeando a estrutura no Piano Roll..."
 ];
