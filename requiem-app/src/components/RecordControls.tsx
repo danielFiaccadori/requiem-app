@@ -1,17 +1,18 @@
 import { useState, useRef, useEffect } from "react";
-import type { TimeSignature } from "./TimeSignatureSelector";
 import { ALL_TONALITIES } from "../engine/TonalityAdapter";
-import { Plus, Settings2, Activity, Music, Mic2, Piano } from "lucide-react";
+import { Plus, Settings2, Activity, Music, Mic2 } from "lucide-react";
 import { OrchestraArranger } from "./OrchestraArranger";
 import type { InstrumentType } from "../hooks/useStringEngine";
 
+export interface TimeSignature {
+  numerator: number;
+  denominator: number;
+}
+
 interface RecordControlsProps {
-  appState: string;
-  isRecording: boolean;
-  isProcessing: boolean;
+  isLive: boolean;
   currentFrequency: number;
   currentNote: string;
-  stateLabels: Record<string, string>;
   preRecordTimeSignature: TimeSignature;
   setPreRecordTimeSignature: (val: TimeSignature) => void;
   preRecordBpm: number | "AUTO";
@@ -24,18 +25,16 @@ interface RecordControlsProps {
   unloadOrchestraInstrument: (id: string) => void;
   activeOrchestraInstruments: string[];
   onArrangerOpenChange?: (isOpen: boolean) => void;
+  onToggleLive?: () => void;
   chordsInstrument?: InstrumentType | "orchestra";
   setChordsInstrument?: (val: InstrumentType | "orchestra") => void;
 }
 
-const COMMON_BPMS = [80, 90, 100, 120, 140, 160];
 const NUMERATOR_OPTIONS = [2, 3, 4, 6, 9];
 const DENOMINATOR_OPTIONS = [4, 8];
 
 export function RecordControls({
-  appState,
-  isRecording,
-  isProcessing,
+  isLive,
   currentFrequency,
   currentNote,
   preRecordTimeSignature,
@@ -50,11 +49,8 @@ export function RecordControls({
   unloadOrchestraInstrument,
   activeOrchestraInstruments,
   onArrangerOpenChange,
-  chordsInstrument,
-  setChordsInstrument,
+  onToggleLive,
 }: RecordControlsProps) {
-  const isInputDisabled = isProcessing;
-  
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [isArrangerOpen, setIsArrangerOpen] = useState(false);
   const settingsRef = useRef<HTMLDivElement>(null);
@@ -106,16 +102,16 @@ export function RecordControls({
         <div className="flex justify-between items-center px-4 mb-2">
           <span className="text-[10px] text-white/40 flex items-center gap-1.5 font-mono uppercase tracking-wider">
             <svg className="w-3 h-3 text-white/30" fill="currentColor" viewBox="0 0 24 24"><path d="M13 10V3L4 14h7v7l9-11h-7z"/></svg>
-            Requiem Engine Ativo
+            Requiem Live Engine
           </span>
           <span className="text-[10px] text-white/40 flex items-center gap-1.5 font-mono uppercase tracking-wider">
-            <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.8)] animate-pulse" />
-            Modelo Pronto
+            <span className={`w-1.5 h-1.5 rounded-full ${isLive ? 'bg-emerald-400 shadow-[0_0_8px_rgba(52,211,153,0.9)] animate-ping' : 'bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.8)] animate-pulse'}`} />
+            {isLive ? 'Ao Vivo' : 'Pronto'}
           </span>
         </div>
 
-        {/* Settings Popup (Above the button) */}
-        {isSettingsOpen && !isInputDisabled && !isRecording && !isProcessing && (
+        {/* Settings Popup */}
+        {isSettingsOpen && !isLive && (
           <div 
             ref={settingsRef}
             className="absolute bottom-full mb-3 left-0 w-full backdrop-blur-sm p-4 flex flex-col sm:flex-row gap-6 animate-fade-in origin-bottom z-50 shadow-2xl"
@@ -131,7 +127,7 @@ export function RecordControls({
             {/* Time Signature */}
             <div className="flex-1 flex flex-col gap-2 border-b sm:border-b-0 sm:border-r border-white/10 pb-4 sm:pb-0 sm:pr-6">
               <span className="text-[10px] uppercase font-mono tracking-wider text-white/40 flex items-center gap-1.5">
-                <Settings2 size={12} /> Fórmula de Compasso
+                <Settings2 size={12} /> Formula de Compasso
               </span>
               <div className="flex items-center gap-4 mt-2">
                 <div className="flex flex-col gap-1 w-full bg-black/40 rounded-lg p-1.5 border border-white/5">
@@ -163,20 +159,20 @@ export function RecordControls({
             {/* BPM */}
             <div className="flex-1 flex flex-col gap-2 border-b sm:border-b-0 sm:border-r border-white/10 pb-4 sm:pb-0 sm:pr-6">
               <span className="text-[10px] uppercase font-mono tracking-wider text-white/40 flex items-center gap-1.5">
-                <Activity size={12} /> Velocidade (BPM)
+                <Activity size={12} /> Andamento (BPM)
               </span>
               <button
                 onClick={() => setPreRecordBpm("AUTO")}
                 className={`mt-2 w-full py-2 rounded-lg text-xs font-medium transition-colors border ${preRecordBpm === "AUTO" ? "bg-emerald-500/20 text-emerald-400 border-emerald-500/30" : "bg-black/40 border-white/5 text-white/60 hover:bg-white/5 hover:text-white"}`}
               >
-                Detectar automaticamente
+                Auto (Score Follower)
               </button>
               <div className="mt-2">
                 <input 
                   type="number"
                   min="40"
                   max="300"
-                  placeholder="Digite o BPM (ex: 120)"
+                  placeholder="BPM manual (ex: 120)"
                   value={customBpmStr}
                   onChange={(e) => {
                     setCustomBpmStr(e.target.value);
@@ -207,7 +203,7 @@ export function RecordControls({
                 onClick={() => setPreRecordTonality("AUTO")}
                 className={`mt-2 w-full py-2 rounded-lg text-xs font-medium transition-colors border ${preRecordTonality === "AUTO" ? "bg-emerald-500/20 text-emerald-400 border-emerald-500/30" : "bg-black/40 border-white/5 text-white/60 hover:bg-white/5 hover:text-white"}`}
               >
-                Detectar automaticamente
+                Tom original da musica
               </button>
               <select
                 value={preRecordTonality}
@@ -221,10 +217,10 @@ export function RecordControls({
               </select>
             </div>
             
-            {/* Temperatura (Criatividade da IA) */}
+            {/* Temperatura (Criatividade) */}
             <div className="flex-1 flex flex-col gap-2 pl-0 sm:pl-6 border-t sm:border-t-0 sm:border-l border-white/10 pt-4 sm:pt-0">
               <span className="text-[10px] uppercase font-mono tracking-wider text-white/40 flex items-center justify-between gap-1.5">
-                <span className="flex items-center gap-1.5"><Activity size={12} /> Criatividade da IA</span>
+                <span className="flex items-center gap-1.5"><Activity size={12} /> Criatividade Harmonica</span>
                 <span className="text-emerald-400 font-bold">{preRecordTemperature.toFixed(1)}</span>
               </span>
               <input
@@ -237,48 +233,16 @@ export function RecordControls({
                 className="w-full mt-3 h-1.5 bg-black/40 rounded-lg appearance-none cursor-pointer border border-white/5 accent-emerald-500"
               />
               <div className="flex justify-between text-[8px] uppercase font-mono text-white/30 mt-1">
-                <span>Literal</span>
-                <span>Selvagem</span>
+                <span>Tradicional</span>
+                <span>Inovador</span>
               </div>
             </div>
 
-            {/* Timbre da Harmonia */}
-            {setChordsInstrument && (
-              <div className="flex-1 flex flex-col gap-2 pl-0 sm:pl-6 border-t sm:border-t-0 sm:border-l border-white/10 pt-4 sm:pt-0">
-                <span className="text-[10px] uppercase font-mono tracking-wider text-white/40 flex items-center justify-between gap-1.5">
-                  <span className="flex items-center gap-1.5"><Piano size={12} /> Timbre da Harmonia</span>
-                </span>
-                <div className="flex flex-col gap-1.5 mt-2">
-                  {[
-                    { id: "piano", label: "Piano Acústico", desc: "Arpejos adaptativos do MIDI" },
-                    { id: "orchestra", label: "Orquestra", desc: "Arranjo orquestral" },
-                    { id: "pad", label: "Pad Ethereal", desc: "Sustentação atmosférica" },
-                  ].map((inst) => {
-                    const isSelected = chordsInstrument === inst.id || (inst.id === "piano" && chordsInstrument === "orchestra" && activeOrchestraInstruments.length === 0);
-                    return (
-                      <button
-                        key={inst.id}
-                        type="button"
-                        onClick={() => setChordsInstrument(inst.id as any)}
-                        className={`text-left px-2.5 py-1.5 rounded-lg text-xs transition-colors border ${
-                          isSelected
-                            ? "bg-emerald-500/20 text-emerald-400 border-emerald-500/30 font-medium"
-                            : "bg-black/40 border-white/5 text-white/60 hover:bg-white/5 hover:text-white"
-                        }`}
-                      >
-                        <div className="text-xs">{inst.label}</div>
-                        <div className="text-[9px] text-white/40 font-mono">{inst.desc}</div>
-                      </button>
-                    );
-                  })}
-                </div>
-              </div>
-            )}
           </div>
         )}
 
         {/* Orchestra Arranger Popup */}
-        {isArrangerOpen && !isInputDisabled && !isRecording && !isProcessing && (
+        {isArrangerOpen && !isLive && (
           <div 
             ref={arrangerRef}
             className="absolute bottom-full mb-3 left-0 sm:left-1/2 sm:-translate-x-1/2 w-[95vw] sm:w-[600px] flex flex-col items-center animate-fade-in origin-bottom z-50 rounded-t-full shadow-2xl"
@@ -293,55 +257,55 @@ export function RecordControls({
 
         {/* Main Input Bar */}
         <div 
+          onClick={onToggleLive}
           className={`
-            relative group flex items-center w-full backdrop-blur-sm
+            relative group flex items-center w-full backdrop-blur-sm cursor-pointer
             py-2 px-3 sm:py-2.5 sm:px-4 transition-all duration-300
-            ${!isInputDisabled ? '' : 'opacity-70'}
-            ${isRecording ? 'shadow-[0_4px_30px_rgba(220,38,38,0.15)]' : ''}
+            ${isLive ? 'shadow-[0_4px_30px_rgba(16,185,129,0.2)]' : ''}
           `}
           style={{
             borderRadius: '20px',
             border: '1px solid transparent',
-            backgroundImage: isRecording 
-              ? 'linear-gradient(90deg, rgba(220,38,38,0.15) 0%, rgba(153,27,27,0.42) 100%), linear-gradient(135deg, rgba(220,38,38,0.62) 0%, transparent 40%)'
+            backgroundImage: isLive 
+              ? 'linear-gradient(90deg, rgba(16,185,129,0.15) 0%, rgba(5,150,105,0.3) 100%), linear-gradient(135deg, rgba(16,185,129,0.5) 0%, transparent 40%)'
               : 'linear-gradient(90deg, rgba(10, 10, 10, 0.61) 0%), linear-gradient(135deg, rgba(62, 62, 62, 0.57) 0%, transparent 40%)',
             backgroundOrigin: 'border-box',
             backgroundClip: 'padding-box, border-box',
             boxShadow: 'inset 0px 0px 5px -2px rgba(242,242,242,0.16)',
           }}
         >
-          {/* left settings button & indicators */}
+          {/* left controls */}
           <div className="flex-shrink-0 flex items-center gap-2 mr-3 z-30">
-            {isRecording ? (
-               <div className="w-10 h-10 sm:w-12 sm:h-12 flex items-center justify-center"><span className="w-2.5 h-2.5 rounded-full bg-red-500 animate-ping" /></div>
-            ) : isProcessing ? (
-               <div className="w-10 h-10 sm:w-12 sm:h-12 flex items-center justify-center"><div className="w-4 h-4 border-2 border-white/20 border-t-white rounded-full animate-spin" /></div>
+            {isLive ? (
+               <div className="w-10 h-10 sm:w-12 sm:h-12 flex items-center justify-center">
+                 <span className="w-3 h-3 rounded-full bg-emerald-400 animate-ping" />
+               </div>
             ) : (
                <div className="flex items-center gap-1">
-                 {/* Botão Maestro / Arranjador */}
+                 {/* Botao Maestro / Arranjador */}
                  <button
                    type="button"
-                   disabled={isInputDisabled}
                    onClick={(e) => {
                      e.stopPropagation();
                      setIsArrangerOpen(!isArrangerOpen);
                      setIsSettingsOpen(false);
                    }}
                    className={`flex items-center justify-center w-10 h-10 sm:w-12 sm:h-12 bg-transparent transition-all duration-300 ${isArrangerOpen ? 'text-amber-400' : 'text-white/50 hover:text-white/80'}`}
+                   aria-label="Arranjo Orquestral"
                  >
                    <Mic2 className={`w-5 h-5 transition-transform duration-300 ${isArrangerOpen ? 'scale-110' : ''}`} />
                  </button>
                  
-                 {/* Botão de Settings original */}
+                 {/* Botao de Configuracoes */}
                  <button
                    type="button"
-                   disabled={isInputDisabled}
                    onClick={(e) => {
                      e.stopPropagation();
                      setIsSettingsOpen(!isSettingsOpen);
                      setIsArrangerOpen(false);
                    }}
                    className={`flex items-center justify-center w-10 h-10 sm:w-12 sm:h-12 bg-transparent transition-all duration-300 ${isSettingsOpen ? 'text-emerald-400' : 'text-white/50 hover:text-white/80'}`}
+                   aria-label="Configuracoes Musicais"
                  >
                    <Plus className={`w-5 h-5 transition-transform duration-300 ${isSettingsOpen ? 'rotate-45' : ''}`} />
                  </button>
@@ -349,7 +313,7 @@ export function RecordControls({
             )}
 
             {/* Custom Pills */}
-            {!isRecording && !isProcessing && (
+            {!isLive && (
               <div className="flex items-center gap-1.5 hidden sm:flex">
                 {(preRecordTimeSignature.numerator !== 4 || preRecordTimeSignature.denominator !== 4) && (
                   <span className="px-2 py-1 rounded-md bg-white border border-white text-[10px] font-mono font-semibold text-black">
@@ -371,23 +335,19 @@ export function RecordControls({
           </div>
 
           <div className="flex-1 flex items-center px-2">
-            <span className={`text-sm sm:text-base font-light transition-colors ${isRecording ? 'text-white' : 'text-white/50 group-hover:text-white/80'}`}>
-              {isRecording 
-                ? (currentNote ? `${currentNote} (${currentFrequency}Hz)` : 'Gravando sinal...') 
-                : isProcessing 
-                ? 'Processando Harmonia...' 
-                : 'Clique no Requiem para iniciar'}
+            <span className={`text-sm sm:text-base font-light transition-colors ${isLive ? 'text-white' : 'text-white/50 group-hover:text-white/80'}`}>
+              {isLive 
+                ? (currentNote ? `Ouvindo: ${currentNote} (${currentFrequency}Hz)` : 'Acompanhamento ao vivo ativo...') 
+                : 'Clique para iniciar o acompanhamento'}
             </span>
           </div>
-
         </div>
 
         {/* AI Disclaimer */}
         <p className="text-center text-[11px] text-white/30 mt-3 font-medium tracking-wide">
-          O Requiem é uma IA e pode cometer erros
+          Requiem Live Engine - Acompanhamento Adaptativo em Tempo Real
         </p>
       </div>
     </div>
   );
 }
-

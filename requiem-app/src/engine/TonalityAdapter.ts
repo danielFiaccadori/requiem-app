@@ -25,7 +25,7 @@ import type { DetectedNote } from "../hooks/usePitchDetector";
 // ─────────────────────────────────────────────────────────
 
 /** Offset em semitons de cada nota fundamental em relação a Dó. */
-const ROOT_OFFSETS: Readonly<Record<string, number>> = {
+export const ROOT_OFFSETS: Readonly<Record<string, number>> = {
   C: 0,   "C#": 1,  Db: 1,
   D: 2,   "D#": 3,  Eb: 3,
   E: 4,   Fb: 4,
@@ -113,7 +113,7 @@ const CHORD_REGEX = /^([A-G][#b]?)(.*)$/;
  * Faz o parsing de um nome de acorde em root + suffix.
  * Retorna null se o formato for inválido.
  */
-const parseChord = (
+export const parseChord = (
   chordName: string,
 ): { root: string; suffix: string; bass?: string } | null => {
   const [base, bass] = chordName.split("/");
@@ -166,6 +166,7 @@ export const normalizeNotes = (
     pitch: n.pitch - offset,
     startTime: n.startTime,
     endTime: n.endTime,
+    amplitude: n.amplitude,
   }));
 };
 

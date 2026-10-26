@@ -1,5 +1,7 @@
 import { memo } from "react";
 
+export type TrackingState = "idle" | "tracking" | "seeking" | "waiting";
+
 interface DynamicRingProps {
   isActive: boolean;
   currentFrequency: number;
@@ -11,6 +13,7 @@ interface DynamicRingProps {
   onDragEnter?: (e: React.DragEvent<HTMLDivElement>) => void;
   onDragLeave?: (e: React.DragEvent<HTMLDivElement>) => void;
   isDragActive?: boolean;
+  trackingState?: TrackingState;
 }
 
 export const DynamicRing = memo(function DynamicRing({
@@ -24,6 +27,7 @@ export const DynamicRing = memo(function DynamicRing({
   onDragEnter,
   onDragLeave,
   isDragActive,
+  trackingState,
 }: DynamicRingProps) {
   const hasFreq = currentFrequency > 0;
   
@@ -48,8 +52,21 @@ export const DynamicRing = memo(function DynamicRing({
   // Abertura do anel altamente responsiva à intensidade do som
   const radiusOffset = hasFreq ? 35 + activeIntensity * 50 : (isActive ? 28 : 18);
   
-  // Hue dinâmico: Graves (Frio) -> Agudos (Quente)
-  const baseHue = 240 - (normalizedFreq * 260);
+  // Hue dinâmico da aura: adaptado ao estado de rastreamento ao vivo ou à frequência
+  let baseHue: number;
+  if (isActive && trackingState && trackingState !== "idle") {
+    if (trackingState === "tracking") {
+      baseHue = 160; // Verde esmeralda (sincronizado no trecho)
+    } else if (trackingState === "seeking") {
+      baseHue = 42; // Âmbar dourado (pausa com leve sustain, detectando trecho)
+    } else {
+      baseHue = 210; // Azul celeste (aguardando áudio)
+    }
+  } else {
+    baseHue = Math.max(40, Math.min(230, 230 - (normalizedFreq * 180)));
+  }
+
+  const hueSpread = (isActive && trackingState && trackingState !== "idle") ? 0.35 : 1;
 
   // Desfoque dramático controlado pela força do som (intensity)
   const blurAmount = hasFreq ? 12 + activeIntensity * 45 : (isActive ? 24 : 12);
@@ -107,7 +124,7 @@ export const DynamicRing = memo(function DynamicRing({
       >
         {lights.map((light, index) => {
           const angle = (index * 360) / lights.length;
-          const currentHue = baseHue + light.hueOffset;
+          const currentHue = (baseHue + light.hueOffset * hueSpread + 360) % 360;
           const dynamicColor = `hsl(${currentHue}, 85%, 65%)`;
           
           return (
@@ -138,7 +155,7 @@ export const DynamicRing = memo(function DynamicRing({
       >
         {lights.slice(0, 5).map((light, index) => {
           const angle = (index * 360) / 5;
-          const currentHue = baseHue + light.hueOffset * 1.5;
+          const currentHue = (baseHue + light.hueOffset * 1.5 * hueSpread + 360) % 360;
           const dynamicColor = `hsl(${currentHue}, 90%, 55%)`;
 
           return (
@@ -159,7 +176,7 @@ export const DynamicRing = memo(function DynamicRing({
 
       {/* Micro-partículas de poeira estelar orbitando */}
       {particles.map((p, i) => {
-        const particleHue = baseHue + p.hueOffset;
+        const particleHue = (baseHue + p.hueOffset * hueSpread + 360) % 360;
         const particleOpacity = hasFreq
           ? p.brightness + activeIntensity * 0.4
           : (isActive ? p.brightness * 0.8 : p.brightness * 0.5);

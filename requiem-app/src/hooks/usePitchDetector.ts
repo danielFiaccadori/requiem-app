@@ -1,9 +1,10 @@
 import { useCallback, useRef, useState, useEffect } from "react";
 import { BasicPitch, outputToNotesPoly, noteFramesToTime } from "@spotify/basic-pitch";
 import * as tf from "@tensorflow/tfjs";
+import { YIN } from "pitchfinder";
 
 // ─────────────────────────────────────────────────────────
-//  usePitchDetector – detecção polifônica via Basic Pitch
+//  usePitchDetector – detecção polifônica e monofônica em tempo real
 // ─────────────────────────────────────────────────────────
 //
 //  Pipeline de transcrição (offline, alta precisão):
@@ -13,10 +14,10 @@ import * as tf from "@tensorflow/tfjs";
 //  4. Float32Array → BasicPitch.evaluateModel() (rede neural).
 //  5. Frames/Onsets → outputToNotesPoly → DetectedNote[].
 //
-//  Pipeline de feedback visual (real-time, leve):
-//  - AnalyserNode + autocorrelação simples → currentNote
-//  - Roda em paralelo com o MediaRecorder
-//  - Apenas para UI, não influencia a transcrição final
+//  Pipeline ao vivo (tempo real de alta fidelidade para cordas/violino):
+//  - YIN (pitchfinder) + Filtro de Mediana para neutralizar vibrato
+//  - Detecção contínua de onset (ataques e transições legato)
+//  - AnalyserNode + RMS dinâmico
 // ─────────────────────────────────────────────────────────
 
 export interface DetectedNote {
@@ -30,7 +31,22 @@ export interface DetectedNote {
   amplitude: number;
 }
 
+export interface LiveOnsetInfo {
+  /** MIDI note exata (arredondada da mediana) */
+  midi: number;
+  /** Pitch class (0-11) */
+  pc: number;
+  /** Timestamp de alta resolução do ataque (performance.now()) */
+  timestamp: number;
+  /** Amplitude RMS no instante do ataque */
+  amplitude: number;
+}
+
 export interface UsePitchDetectorReturn {
+  /** Inicia captura em tempo real para acompanhamento ao vivo */
+  startLiveListening: () => Promise<void>;
+  /** Encerra captura em tempo real */
+  stopLiveListening: () => Promise<void>;
   /** Pede permissão e liga o microfone (útil para feedback visual durante o count-in) */
   prepareListening: () => Promise<void>;
   /** Começa a gravar no MediaRecorder instantaneamente */
@@ -51,6 +67,14 @@ export interface UsePitchDetectorReturn {
   currentNote: string;
   /** Frequência atual detectada em tempo real (Hz), 0 se silêncio */
   currentFrequency: number;
+  /** Nível RMS atual do microfone (0-1), atualizado a cada frame sem re-render */
+  levelRef: { current: number };
+  /** Nota MIDI atual com filtro de vibrato (0-127 ou null) */
+  liveMidiRef: { current: number | null };
+  /** Desvio em cents (-50 a +50) em relação à afinação temperada */
+  currentCentsRef: { current: number };
+  /** Último ataque confirmado (transição de nota ou re-ataque de arco) */
+  lastOnsetRef: { current: LiveOnsetInfo | null };
 }
 
 // ── Constantes ──────────────────────────────────────────
@@ -62,7 +86,7 @@ const MODEL_URL =
 const NOTE_NAMES = ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"];
 
 /** Converte frequência Hz para MIDI pitch number. */
-function freqToMidi(freq: number): number {
+export function freqToMidi(freq: number): number {
   return Math.round(12 * Math.log2(freq / 440) + 69);
 }
 
@@ -197,6 +221,18 @@ export function usePitchDetector(): UsePitchDetectorReturn {
   const analyserRef = useRef<AnalyserNode | null>(null);
   const rafRef = useRef<number | null>(null);
   const isListeningRef = useRef(false);
+  const levelRef = useRef(0);
+
+  // Refs de alta precisão para violino / cordas
+  const yinDetectorRef = useRef<((buffer: Float32Array) => number | null) | null>(null);
+  const pitchHistoryRef = useRef<number[]>([]);
+  const liveMidiRef = useRef<number | null>(null);
+  const currentCentsRef = useRef<number>(0);
+  const lastOnsetRef = useRef<LiveOnsetInfo | null>(null);
+  const lastStableMidiRef = useRef<number | null>(null);
+  const newNoteHoldCountRef = useRef<number>(0);
+  const lastOnsetTimestampRef = useRef<number>(0);
+  const lastRmsRef = useRef<number>(0);
 
   // ── Inicialização do Modelo ───────────────────────────
   useEffect(() => {
@@ -211,7 +247,7 @@ export function usePitchDetector(): UsePitchDetectorReturn {
     })();
   }, []);
 
-  // ── Loop de detecção real-time (visual feedback) ──────
+  // ── Loop de detecção real-time (YIN + Filtro de Mediana de Vibrato) ──────
   const detectLoop = useCallback(() => {
     if (!isListeningRef.current || !analyserRef.current) return;
 
@@ -219,19 +255,183 @@ export function usePitchDetector(): UsePitchDetectorReturn {
     const buffer = new Float32Array(analyser.fftSize);
     analyser.getFloatTimeDomainData(buffer);
 
-    const freq = autoCorrelate(buffer, analyser.context.sampleRate);
+    let sumSq = 0;
+    for (let i = 0; i < buffer.length; i++) sumSq += buffer[i] * buffer[i];
+    const rms = Math.sqrt(sumSq / buffer.length);
+    levelRef.current = rms;
+
+    let freq = 0;
+    if (rms >= 0.012) {
+      if (yinDetectorRef.current) {
+        try {
+          const detected = yinDetectorRef.current(buffer);
+          if (detected !== null && isFinite(detected) && detected >= 130 && detected <= 2800) {
+            freq = detected;
+          }
+        } catch {
+          // ignore
+        }
+      }
+      if (freq <= 0) {
+        freq = autoCorrelate(buffer, analyser.context.sampleRate);
+      }
+    }
 
     if (freq > 0) {
-      const midi = freqToMidi(freq);
+      const rawMidi = 12 * Math.log2(freq / 440) + 69;
+      pitchHistoryRef.current.push(rawMidi);
+      if (pitchHistoryRef.current.length > 7) {
+        pitchHistoryRef.current.shift();
+      }
+
+      // Filtro de Mediana para anular a oscilação de vibrato (violino oscila ~30-60 cents)
+      const sorted = [...pitchHistoryRef.current].sort((a, b) => a - b);
+      const medianMidi = sorted[Math.floor(sorted.length / 2)];
+      const roundedMidi = Math.round(medianMidi);
+      const cents = Math.round((medianMidi - roundedMidi) * 100);
+
       setCurrentFrequency(Math.round(freq));
-      setCurrentNote(midiToNoteName(midi));
+      const noteName = midiToNoteName(roundedMidi);
+      setCurrentNote(noteName);
+      liveMidiRef.current = roundedMidi;
+      currentCentsRef.current = cents;
+
+      const now = performance.now();
+      const prevMidi = lastStableMidiRef.current;
+      const prevRms = lastRmsRef.current;
+
+      const isNoteChange = roundedMidi !== prevMidi;
+      const isReattack = rms > 0.025 && prevRms > 0 && (rms / prevRms > 1.7) && (now - lastOnsetTimestampRef.current > 120);
+
+      if (isNoteChange) {
+        newNoteHoldCountRef.current++;
+        // Exige 2 frames de confirmação (~30ms) para rejeitar ruídos de transição de arcada
+        if (newNoteHoldCountRef.current >= 2) {
+          lastStableMidiRef.current = roundedMidi;
+          newNoteHoldCountRef.current = 0;
+          lastOnsetTimestampRef.current = now;
+          lastOnsetRef.current = {
+            midi: roundedMidi,
+            pc: ((roundedMidi % 12) + 12) % 12,
+            timestamp: now,
+            amplitude: rms,
+          };
+        }
+      } else {
+        newNoteHoldCountRef.current = 0;
+        if (isReattack) {
+          lastOnsetTimestampRef.current = now;
+          lastOnsetRef.current = {
+            midi: roundedMidi,
+            pc: ((roundedMidi % 12) + 12) % 12,
+            timestamp: now,
+            amplitude: rms,
+          };
+        }
+      }
     } else {
+      pitchHistoryRef.current = [];
+      newNoteHoldCountRef.current = 0;
       setCurrentFrequency(0);
       setCurrentNote("");
+      liveMidiRef.current = null;
+      currentCentsRef.current = 0;
     }
+    lastRmsRef.current = rms;
 
     rafRef.current = requestAnimationFrame(detectLoop);
   }, []);
+
+  // ── Acompanhamento ao Vivo (Instantâneo sem gravação em buffer) ─
+  const startLiveListening = useCallback(async () => {
+    if (streamRef.current || isProcessing) return;
+
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({
+        audio: {
+          echoCancellation: true,
+          noiseSuppression: false,
+          autoGainControl: false,
+          channelCount: 1,
+        },
+      });
+
+      streamRef.current = stream;
+
+      const audioCtx = new AudioContext();
+      const source = audioCtx.createMediaStreamSource(stream);
+      const analyser = audioCtx.createAnalyser();
+      analyser.fftSize = 2048;
+      analyser.smoothingTimeConstant = 0;
+      source.connect(analyser);
+
+      yinDetectorRef.current = YIN({
+        sampleRate: audioCtx.sampleRate,
+        threshold: 0.15,
+      });
+
+      audioCtxRef.current = audioCtx;
+      analyserRef.current = analyser;
+      isListeningRef.current = true;
+
+      pitchHistoryRef.current = [];
+      liveMidiRef.current = null;
+      currentCentsRef.current = 0;
+      lastOnsetRef.current = null;
+      lastStableMidiRef.current = null;
+      newNoteHoldCountRef.current = 0;
+
+      setCurrentNote("");
+      setCurrentFrequency(0);
+      setIsListening(true);
+
+      rafRef.current = requestAnimationFrame(detectLoop);
+    } catch (err) {
+      console.error("Erro ao acessar microfone:", err);
+    }
+  }, [isProcessing, detectLoop]);
+
+  // ── Cancelamento Instantâneo ──────────────────────────
+  const cancelListening = useCallback(async () => {
+    setIsListening(false);
+    setIsProcessing(false);
+    setCurrentNote("");
+    setCurrentFrequency(0);
+
+    pitchHistoryRef.current = [];
+    liveMidiRef.current = null;
+    currentCentsRef.current = 0;
+    lastOnsetRef.current = null;
+    lastStableMidiRef.current = null;
+    newNoteHoldCountRef.current = 0;
+    yinDetectorRef.current = null;
+
+    isListeningRef.current = false;
+    if (rafRef.current) {
+      cancelAnimationFrame(rafRef.current);
+      rafRef.current = null;
+    }
+
+    if (mediaRecorderRef.current && mediaRecorderRef.current.state !== "inactive") {
+      mediaRecorderRef.current.onstop = null; // evita que o onstop processe áudio
+      mediaRecorderRef.current.stop();
+    }
+    mediaRecorderRef.current = null;
+    audioChunksRef.current = [];
+
+    if (streamRef.current) {
+      streamRef.current.getTracks().forEach((t) => t.stop());
+      streamRef.current = null;
+    }
+
+    if (audioCtxRef.current) {
+      await audioCtxRef.current.close();
+      audioCtxRef.current = null;
+      analyserRef.current = null;
+    }
+  }, []);
+
+  const stopLiveListening = cancelListening;
 
   // ── 1. Prepare (Mic On, Visuals On, NO RECORDING YET) ─
   const prepareListening = useCallback(async () => {
@@ -257,9 +457,21 @@ export function usePitchDetector(): UsePitchDetectorReturn {
       analyser.smoothingTimeConstant = 0;
       source.connect(analyser);
 
+      yinDetectorRef.current = YIN({
+        sampleRate: audioCtx.sampleRate,
+        threshold: 0.15,
+      });
+
       audioCtxRef.current = audioCtx;
       analyserRef.current = analyser;
       isListeningRef.current = true;
+
+      pitchHistoryRef.current = [];
+      liveMidiRef.current = null;
+      currentCentsRef.current = 0;
+      lastOnsetRef.current = null;
+      lastStableMidiRef.current = null;
+      newNoteHoldCountRef.current = 0;
 
       setCurrentNote("");
       setCurrentFrequency(0);
@@ -291,39 +503,6 @@ export function usePitchDetector(): UsePitchDetectorReturn {
     setIsListening(true);
     console.log(`[Recorder] Iniciado com mimeType: ${mediaRecorder.mimeType}`);
   }, [isListening]);
-
-
-  // ── Cancelamento Instantâneo ──────────────────────────
-  const cancelListening = useCallback(async () => {
-    setIsListening(false);
-    setIsProcessing(false);
-    setCurrentNote("");
-    setCurrentFrequency(0);
-
-    isListeningRef.current = false;
-    if (rafRef.current) {
-      cancelAnimationFrame(rafRef.current);
-      rafRef.current = null;
-    }
-
-    if (mediaRecorderRef.current && mediaRecorderRef.current.state !== "inactive") {
-      mediaRecorderRef.current.onstop = null; // evita que o onstop processe áudio
-      mediaRecorderRef.current.stop();
-    }
-    mediaRecorderRef.current = null;
-    audioChunksRef.current = [];
-
-    if (streamRef.current) {
-      streamRef.current.getTracks().forEach((t) => t.stop());
-      streamRef.current = null;
-    }
-
-    if (audioCtxRef.current) {
-      await audioCtxRef.current.close();
-      audioCtxRef.current = null;
-      analyserRef.current = null;
-    }
-  }, []);
 
   // ── Stop & Process ────────────────────────────────────
   const capturedChunksRef = useRef<Blob[]>([]);
@@ -483,6 +662,8 @@ export function usePitchDetector(): UsePitchDetectorReturn {
   }, [pauseListening, processPausedAudio]);
 
   return {
+    startLiveListening,
+    stopLiveListening,
     prepareListening,
     startRecording,
     cancelListening,
@@ -493,5 +674,9 @@ export function usePitchDetector(): UsePitchDetectorReturn {
     isProcessing,
     currentNote,
     currentFrequency,
+    levelRef,
+    liveMidiRef,
+    currentCentsRef,
+    lastOnsetRef,
   };
 }

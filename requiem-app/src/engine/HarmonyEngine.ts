@@ -129,17 +129,6 @@ function b64toF32(b64: string): Float32Array {
   return new Float32Array(buf.buffer);
 }
 
-// Matrix mul: A(m,k) × B(k,n) → C(m,n)
-function matMul(A: Float32Array, B: Float32Array, m: number, k: number, n: number): Float32Array {
-  const C = new Float32Array(m * n);
-  for (let i = 0; i < m; i++)
-    for (let j = 0; j < n; j++) {
-      let s = 0;
-      for (let p = 0; p < k; p++) s += A[i * k + p] * B[p * n + j];
-      C[i * n + j] = s;
-    }
-  return C;
-}
 
 function sigmoid(x: number): number { return 1 / (1 + Math.exp(-x)); }
 function tanh(x: number): number { return Math.tanh(x); }
@@ -294,10 +283,10 @@ function predict(chordHistory: readonly string[], melodyChroma?: number[]): Floa
   // Run LSTM forward pass
   // mask_zero=True: PAD tokens (idx=0) are skipped — h/c unchanged during masked steps.
   // This matches Keras Embedding(mask_zero=True) → LSTM masking behavior.
-  let h1 = new Float32Array(units1);
-  let c1 = new Float32Array(units1);
-  let h2 = new Float32Array(units2);
-  let c2 = new Float32Array(units2);
+  let h1: any = new Float32Array(units1);
+  let c1: any = new Float32Array(units1);
+  let h2: any = new Float32Array(units2);
+  let c2: any = new Float32Array(units2);
 
   for (let t = 0; t < WINDOW_SIZE; t++) {
     const idx = context[t];

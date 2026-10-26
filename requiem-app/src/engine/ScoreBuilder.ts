@@ -43,13 +43,27 @@ export interface MelodyEvent {
   start: number;
   /** Fim em beats (= início do próximo evento) */
   end: number;
+  /** Duração calculada em beats */
+  duration: number;
   /** Ataques internos (re-articulações da mesma nota colapsadas neste evento) */
   onsets: number[];
   bar: number;
+  /** Posição do tempo dentro do compasso (0 .. beatsPerBar) */
+  beatInBar: number;
+  /** Se o ataque ocorre exatamente no tempo forte (downbeat) */
+  isDownbeat: boolean;
   /** Peso de "ponto de reentrada" (início de frase / tempo forte) */
   entryWeight: number;
   /** Índice do acorde soando no início do evento */
   chordIndex: number;
+  /** Símbolo do acorde associado */
+  chordSymbol: string;
+  /** Intervalo em semitons em relação à nota anterior (0 na primeira nota) */
+  intervalFromPrev: number;
+  /** Intervalo em semitons em relação à próxima nota (0 na última nota) */
+  intervalToNext: number;
+  /** Se esta nota melódica pertence à tétrade/tríade do acorde */
+  isChordTone: boolean;
 }
 
 export interface ScoreChord {
@@ -72,6 +86,15 @@ export interface ArpeggioNote {
   velocity: number;
 }
 
+export interface LearnedMelodySignature {
+  /** N-gram de 2 notas: "pc1_pc2" -> lista de índices na melodia */
+  bigrams: Record<string, number[]>;
+  /** N-gram de 3 notas: "pc1_pc2_pc3" -> lista de índices na melodia */
+  trigrams: Record<string, number[]>;
+  /** Intervalos relativos entre notas sucessivas */
+  intervals: Record<string, number[]>;
+}
+
 export interface SongScore {
   songId: string;
   title: string;
@@ -84,6 +107,10 @@ export interface SongScore {
   totalBeats: number;
   melody: MelodyEvent[];
   chords: ScoreChord[];
+  /** Padrões N-Gram aprendidos da melodia para reconhecimento instantâneo de saltos e repetições */
+  signatures?: LearnedMelodySignature;
+  /** Matriz de transições de acordes aprendidas a partir do próprio MIDI */
+  chordTransitions?: Record<string, { symbol: string; count: number }[]>;
 }
 
 // ─────────────────────────────────────────────────────────
@@ -189,26 +216,79 @@ export function transposeChord(chord: ScoreChord, semitones: number, targetKey: 
   };
 }
 
+/** Constrói o índice N-Gram melódico (bi-gramas, tri-gramas e intervalos) para identificação instantânea de saltos/voltas. */
+export function buildLearnedSignatures(melody: MelodyEvent[]): LearnedMelodySignature {
+  const bigrams: Record<string, number[]> = {};
+  const trigrams: Record<string, number[]> = {};
+  const intervals: Record<string, number[]> = {};
+
+  for (let i = 0; i < melody.length - 1; i++) {
+    const bKey = `${melody[i].pc}_${melody[i + 1].pc}`;
+    if (!bigrams[bKey]) bigrams[bKey] = [];
+    bigrams[bKey].push(i + 1);
+
+    const intKey = `${melody[i + 1].midi - melody[i].midi}`;
+    if (!intervals[intKey]) intervals[intKey] = [];
+    intervals[intKey].push(i + 1);
+  }
+
+  for (let i = 0; i < melody.length - 2; i++) {
+    const tKey = `${melody[i].pc}_${melody[i + 1].pc}_${melody[i + 2].pc}`;
+    if (!trigrams[tKey]) trigrams[tKey] = [];
+    trigrams[tKey].push(i + 2);
+
+    const int2Key = `${melody[i + 1].midi - melody[i].midi}_${melody[i + 2].midi - melody[i + 1].midi}`;
+    if (!intervals[int2Key]) intervals[int2Key] = [];
+    intervals[int2Key].push(i + 2);
+  }
+
+  return { bigrams, trigrams, intervals };
+}
+
+/** Extrai a matriz empírica de transição de acordes aprendida da própria obra. */
+export function buildChordTransitions(chords: ScoreChord[]): Record<string, { symbol: string; count: number }[]> {
+  const counts: Record<string, Record<string, number>> = {};
+  for (let i = 0; i < chords.length - 1; i++) {
+    const from = chords[i].symbol;
+    const to = chords[i + 1].symbol;
+    if (!counts[from]) counts[from] = {};
+    counts[from][to] = (counts[from][to] || 0) + 1;
+  }
+  const result: Record<string, { symbol: string; count: number }[]> = {};
+  for (const [from, toMap] of Object.entries(counts)) {
+    result[from] = Object.entries(toMap).map(([symbol, count]) => ({ symbol, count }));
+  }
+  return result;
+}
+
 /** Transpõe uma SongScore completa em `semitones` para `targetKey`. */
 export function transposeSongScore(score: SongScore, semitones: number, targetKey: string): SongScore {
   if (semitones === 0) return { ...score, key: targetKey };
   const tPc = (pc: number) => (((pc + semitones) % 12) + 12) % 12;
 
-  const transposedMelody: MelodyEvent[] = score.melody.map(m => ({
-    ...m,
-    pc: tPc(m.pc),
-    midi: Math.max(0, Math.min(127, m.midi + semitones)),
-  }));
-
   const transposedChords: ScoreChord[] = score.chords.map(c =>
     transposeChord(c, semitones, targetKey)
   );
+
+  const transposedMelody: MelodyEvent[] = score.melody.map(m => {
+    const chord = transposedChords[m.chordIndex];
+    const newPc = tPc(m.pc);
+    return {
+      ...m,
+      pc: newPc,
+      midi: Math.max(0, Math.min(127, m.midi + semitones)),
+      chordSymbol: chord ? chord.symbol : m.chordSymbol,
+      isChordTone: chord ? chord.pcs.includes(newPc) : m.isChordTone,
+    };
+  });
 
   return {
     ...score,
     key: targetKey,
     melody: transposedMelody,
     chords: transposedChords,
+    signatures: buildLearnedSignatures(transposedMelody),
+    chordTransitions: buildChordTransitions(transposedChords),
   };
 }
 
@@ -251,6 +331,8 @@ export function buildSongScore(midi: MidiLike, manifest: SongManifest): SongScor
 
   const chords = extractHarmony(notes, beatsPerBar, totalBeats, meter, manifest.key);
   const melody = extractMelody(notes, manifest.melodyTrack, beatsPerBar, totalBeats, chords);
+  const signatures = buildLearnedSignatures(melody);
+  const chordTransitions = buildChordTransitions(chords);
 
   return {
     songId: manifest.id,
@@ -263,6 +345,8 @@ export function buildSongScore(midi: MidiLike, manifest: SongManifest): SongScor
     totalBeats,
     melody,
     chords,
+    signatures,
+    chordTransitions,
   };
 }
 
@@ -435,16 +519,29 @@ function extractMelody(
     let entryWeight = 1;
     if (prevDur >= beatsPerBar) entryWeight += 4;
     if (onDownbeat) entryWeight += 2;
+    const ci = chordAt(d.start);
+    const chord = chords[ci];
+    const isChordTone = chord ? chord.pcs.includes(d.pc) : false;
+    const intervalFromPrev = index > 0 ? d.midi - drafts[index - 1].midi : 0;
+    const intervalToNext = index + 1 < drafts.length ? drafts[index + 1].midi - d.midi : 0;
+
     return {
       index,
       pc: d.pc,
       midi: d.midi,
       start: d.start,
       end,
+      duration: end - d.start,
       onsets: d.onsets,
       bar: Math.floor(d.start / beatsPerBar),
+      beatInBar: posInBar,
+      isDownbeat: onDownbeat,
       entryWeight,
-      chordIndex: chordAt(d.start),
+      chordIndex: ci,
+      chordSymbol: chord?.symbol ?? "",
+      intervalFromPrev,
+      intervalToNext,
+      isChordTone,
     };
   });
 }

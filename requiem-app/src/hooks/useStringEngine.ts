@@ -16,6 +16,16 @@ export interface StringEngineApi {
   activeOrchestraInstruments: string[];
   setTrackVolume: (trackIndex: number, vol: number) => void;
   setTrackMute: (trackIndex: number, muted: boolean) => void;
+
+  // Acompanhamento ao vivo (nao afeta a tela de edicao)
+  /** Toca notas sustentadas (sem release agendado). Libera as anteriores com crossfade de `overlap` segundos. */
+  playLiveNotes: (midis: number[], velocity: number, instrument: InstrumentType | "orchestra", overlap?: number) => void;
+  /** Libera todas as notas ao vivo com fade-out curto. */
+  releaseLive: (fadeSec?: number) => void;
+  /** Ajusta o ganho geral ao vivo (0-1.2) conforme a dinamica do cantor. */
+  setLiveDynamics: (gain: number) => void;
+  /** Toca um arpejo de piano ao vivo cancelando o anterior (sem sobreposicao). Tempos em segundos. */
+  playLiveArpeggio: (notes: { midi: number; offset: number; duration: number; velocity: number }[]) => void;
 }
 
 export function useStringEngine(): StringEngineApi {
@@ -23,6 +33,8 @@ export function useStringEngine(): StringEngineApi {
   const pianoSynthRef = useRef<Tone.Sampler | null>(null);
   const padSynthRef = useRef<Tone.PolySynth | null>(null);
   const limiterRef = useRef<Tone.Limiter | null>(null);
+  const liveGainRef = useRef<Tone.Gain | null>(null);
+  const arpTimersRef = useRef<ReturnType<typeof setTimeout>[]>([]);
   
   const orchestraMapRef = useRef<Record<string, Record<string, string>>>({});
   const loadedOrchestraRef = useRef<Record<string, Tone.Sampler>>({});
@@ -33,12 +45,15 @@ export function useStringEngine(): StringEngineApi {
     const limiter = new Tone.Limiter(-2).toDestination();
     limiterRef.current = limiter;
     
+    const liveGain = new Tone.Gain(1).connect(limiter);
+    liveGainRef.current = liveGain;
+
     const reverb = new Tone.Reverb({
       decay: 3.5,
       preDelay: 0.05,
       wet: 0.4
     });
-    reverb.connect(limiter);
+    reverb.connect(liveGain);
     reverb.generate(); // Inicializa o buffer do Reverb
 
     // 2. Instanciar PIANO (Sampler Base)
@@ -94,6 +109,7 @@ export function useStringEngine(): StringEngineApi {
       pianoSynth.dispose();
       padSynth.dispose();
       reverb.dispose();
+      liveGain.dispose();
       limiter.dispose();
       Object.values(loadedOrchestraRef.current).forEach(s => s.dispose());
     };
@@ -139,9 +155,9 @@ export function useStringEngine(): StringEngineApi {
       }
     });
     
-    // Conectar ao limiter para evitar estouro de áudio no Tutti
-    if (limiterRef.current) {
-      sampler.connect(limiterRef.current);
+    // Conectar ao ganho geral (-> limiter) para evitar estouro de audio no Tutti
+    if (liveGainRef.current) {
+      sampler.connect(liveGainRef.current);
     } else {
       sampler.toDestination();
     }
@@ -229,7 +245,7 @@ export function useStringEngine(): StringEngineApi {
     }
   }, [isReady, activeOrchestraInstruments]);
 
-  const playSequence = useCallback(async (seq: any, offset: number = 0, melodyInst: InstrumentType | "orchestra" = "piano", chordsInst: InstrumentType | "orchestra" = "piano") => {
+  const playSequence = useCallback(async (seq: any, _offset: number = 0, melodyInst: InstrumentType | "orchestra" = "piano", chordsInst: InstrumentType | "orchestra" = "piano") => {
     if (!isReady) return;
     const now = Tone.now() + 0.1;
     
@@ -296,8 +312,126 @@ export function useStringEngine(): StringEngineApi {
     if (trackIndex === 0 && pianoSynthRef.current) pianoSynthRef.current.volume.value = Tone.gainToDb(vol);
   }, []);
 
-  const setTrackMute = useCallback((trackIndex: number, muted: boolean) => {
+  const setTrackMute = useCallback((_trackIndex: number, _muted: boolean) => {
     // No-op para a orquestra por enquanto
+  }, []);
+
+  // ── Acompanhamento ao vivo ──────────────────────────────
+  const LIVE_SAMPLER_RELEASE = 0.45;
+  const PIANO_PEDAL_SUSTAIN_RELEASE = 3.5;
+  const PIANO_DAMPER_CHANGE_FADE = 0.45;
+
+  const liveTargets = useCallback((instrument: InstrumentType | "orchestra") => {
+    const samplers: Tone.Sampler[] = [];
+    let pad: Tone.PolySynth | null = null;
+    if (instrument === "orchestra") {
+      const loaded = Object.values(loadedOrchestraRef.current);
+      if (loaded.length > 0) samplers.push(...loaded);
+      else if (pianoSynthRef.current) samplers.push(pianoSynthRef.current);
+    } else if (instrument === "piano") {
+      if (pianoSynthRef.current) samplers.push(pianoSynthRef.current);
+    } else if (padSynthRef.current) {
+      pad = padSynthRef.current;
+    }
+    return { samplers, pad };
+  }, []);
+
+  const playLiveNotes = useCallback((
+    midis: number[],
+    velocity: number,
+    instrument: InstrumentType | "orchestra",
+    overlap: number = 0
+  ) => {
+    if (!isReady || midis.length === 0) return;
+    try {
+      const isPiano = instrument === "piano" || (instrument === "orchestra" && activeOrchestraInstruments.length === 0);
+      const { samplers, pad } = liveTargets(instrument);
+      const notes = midis.map(m => Tone.Frequency(m, "midi").toNote());
+      const releaseAt = Tone.now() + 0.03 + overlap;
+      const startAt = Tone.now() + 0.03;
+      const vel = Math.min(1, Math.max(0.05, velocity));
+
+      if (isPiano) {
+        // Comportamento de pedal exclusivo para o piano
+        const piano = pianoSynthRef.current;
+        if (piano) {
+          // 1. Troca sincopada de pedal: abafa o acorde anterior suavemente
+          piano.release = PIANO_DAMPER_CHANGE_FADE;
+          piano.releaseAll(releaseAt);
+
+          // 2. Novo ataque com pedal de sustentacao abaixado: ressonancia acustica prolongada
+          piano.release = PIANO_PEDAL_SUSTAIN_RELEASE;
+          piano.triggerAttack(notes, startAt, vel);
+        }
+      } else {
+        samplers.forEach(s => {
+          s.releaseAll(releaseAt);
+          const prev = s.release;
+          s.release = LIVE_SAMPLER_RELEASE;
+          s.triggerAttack(notes, startAt, vel);
+          s.release = prev;
+        });
+      }
+
+      if (pad) {
+        pad.releaseAll(releaseAt);
+        pad.triggerAttack(notes, startAt, vel);
+      }
+    } catch (e) {
+      console.warn("Audio error playLiveNotes", e);
+    }
+  }, [isReady, liveTargets, activeOrchestraInstruments]);
+
+  const clearArpTimers = useCallback(() => {
+    arpTimersRef.current.forEach(clearTimeout);
+    arpTimersRef.current = [];
+  }, []);
+
+  const releaseLive = useCallback((fadeSec: number = 0.4) => {
+    clearArpTimers();
+    const t = Tone.now();
+    if (pianoSynthRef.current) {
+      pianoSynthRef.current.release = fadeSec;
+      pianoSynthRef.current.releaseAll(t);
+      setTimeout(() => {
+        if (pianoSynthRef.current) pianoSynthRef.current.release = PIANO_PEDAL_SUSTAIN_RELEASE;
+      }, 100);
+    }
+    Object.values(loadedOrchestraRef.current).forEach(s => s.releaseAll(t));
+    const pad = padSynthRef.current;
+    if (pad) {
+      pad.set({ envelope: { release: fadeSec } });
+      pad.releaseAll(t);
+      setTimeout(() => pad.set({ envelope: { release: 2.0 } }), 150);
+    }
+  }, [clearArpTimers]);
+
+  const playLiveArpeggio = useCallback((
+    notes: { midi: number; offset: number; duration: number; velocity: number }[]
+  ) => {
+    const piano = pianoSynthRef.current;
+    if (!isReady || !piano) return;
+    // Cancela o arpejo anterior e silencia suas notas (release curto)
+    clearArpTimers();
+    piano.releaseAll(Tone.now());
+
+    notes.forEach(n => {
+      const name = Tone.Frequency(n.midi, "midi").toNote();
+      const vel = Math.min(1, Math.max(0.05, n.velocity));
+      arpTimersRef.current.push(setTimeout(() => {
+        const prev = piano.release;
+        piano.release = 0.5;
+        piano.triggerAttack(name, Tone.now(), vel);
+        piano.release = prev;
+      }, Math.max(0, n.offset * 1000)));
+      arpTimersRef.current.push(setTimeout(() => {
+        piano.triggerRelease(name, Tone.now());
+      }, Math.max(0, (n.offset + n.duration) * 1000)));
+    });
+  }, [isReady, clearArpTimers]);
+
+  const setLiveDynamics = useCallback((gain: number) => {
+    liveGainRef.current?.gain.rampTo(Math.min(1.2, Math.max(0, gain)), 0.08);
   }, []);
 
   return { 
@@ -310,6 +444,10 @@ export function useStringEngine(): StringEngineApi {
     activeOrchestraInstruments,
     setTrackVolume,
     setTrackMute,
-    playSequence
+    playSequence,
+    playLiveNotes,
+    releaseLive,
+    setLiveDynamics,
+    playLiveArpeggio
   };
 }

@@ -1,4 +1,4 @@
-import { memo, useMemo } from 'react';
+import { memo } from 'react';
 
 // Helpers para construir SVG Paths de seções (fatias de pizza)
 function polarToCartesian(centerX: number, centerY: number, radius: number, angleInDegrees: number) {
