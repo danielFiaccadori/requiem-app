@@ -1,9 +1,24 @@
 @import "tailwindcss";
 @config "../tailwind.config.js";
 
-body {
+html, body {
   margin: 0;
-  background-color: #030712; /* bg-gray-950 de garantia */
+  padding: 0;
+  height: 100%;
+  width: 100%;
+  overflow: hidden;
+  background-color: #07080a;
+}
+
+/* Fix browser autofill background on dark inputs */
+input:-webkit-autofill,
+input:-webkit-autofill:hover, 
+input:-webkit-autofill:focus, 
+input:-webkit-autofill:active {
+  -webkit-box-shadow: 0 0 0 1000px #121317 inset !important;
+  -webkit-text-fill-color: #ffffff !important;
+  caret-color: #ffffff !important;
+  transition: background-color 5000s ease-in-out 0s;
 }
 
 @keyframes twinkle {

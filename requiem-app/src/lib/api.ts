@@ -1,28 +1,31 @@
-// Central API client for backend communication
-const BASE_URL: string = ((import.meta as any).env?.VITE_API_URL ?? '');
+// Central API client for Requiem backend communication (Auth, Sessions & Preset Store)
+const BASE_URL: string = ((import.meta as any).env?.VITE_API_URL ?? 'http://localhost:3001/api').replace(/\/$/, '');
 
 function getToken(): string | null {
   return localStorage.getItem('requiem_token');
 }
 
-async function apiFetch<T>(path: string, options: RequestInit = {}): Promise<T> {
-  const token = getToken();
+async function apiFetch<T>(
+  path: string,
+  options: RequestInit & { skipAuth?: boolean } = {}
+): Promise<T> {
+  const { skipAuth, ...fetchOptions } = options;
+  const token = skipAuth ? null : getToken();
   const headers: Record<string, string> = {
     'Content-Type': 'application/json',
-    ...(options.headers as Record<string, string>),
+    ...(fetchOptions.headers as Record<string, string>),
   };
   if (token) headers['Authorization'] = `Bearer ${token}`;
 
-  const res = await fetch(`${BASE_URL}${path}`, { ...options, headers });
+  const res = await fetch(`${BASE_URL}${path}`, { ...fetchOptions, headers });
 
-  // Lê o body como texto para evitar crash em respostas vazias ou não-JSON
+  // Read body as text to avoid crash on empty or non-JSON responses
   const text = await res.text();
   let data: any = {};
   if (text) {
     try {
       data = JSON.parse(text);
     } catch {
-      // Resposta não é JSON (ex: HTML de erro do Tomcat)
       if (!res.ok) throw new Error(`Erro ${res.status}: ${res.statusText}`);
     }
   }
@@ -31,11 +34,17 @@ async function apiFetch<T>(path: string, options: RequestInit = {}): Promise<T> 
   return data as T;
 }
 
+// ── Health ────────────────────────────────────────────────
+export async function apiHealth() {
+  return apiFetch<{ status: string }>('/health', { skipAuth: true });
+}
+
 // ── Auth ──────────────────────────────────────────────────
 export async function apiLogin(email: string, password: string) {
   return apiFetch<{ token: string; user: User }>('/auth/login', {
     method: 'POST',
     body: JSON.stringify({ email, password }),
+    skipAuth: true,
   });
 }
 
@@ -43,6 +52,7 @@ export async function apiRegister(email: string, name: string, password: string)
   return apiFetch<{ token: string; user: User }>('/auth/register', {
     method: 'POST',
     body: JSON.stringify({ email, name, password }),
+    skipAuth: true,
   });
 }
 
@@ -58,7 +68,7 @@ export async function apiGetSessions() {
 export async function apiCreateSession(title?: string) {
   return apiFetch<{ session: ChatSession }>('/sessions', {
     method: 'POST',
-    body: JSON.stringify({ title }),
+    body: JSON.stringify(title ? { title } : {}),
   });
 }
 
@@ -73,10 +83,27 @@ export async function apiRenameSession(id: string, title: string) {
   });
 }
 
-export async function apiSaveComposition(id: string, compositionData: SerializedBlock[]) {
+export async function apiSaveComposition(
+  id: string,
+  compositionData: SerializedBlock[],
+  title?: string
+) {
+  const payload: { compositionData: SerializedBlock[]; title?: string } = { compositionData };
+  if (title !== undefined) payload.title = title;
   return apiFetch<{ success: boolean }>(`/sessions/${id}`, {
     method: 'PATCH',
-    body: JSON.stringify({ compositionData }),
+    body: JSON.stringify(payload),
+  });
+}
+
+export async function apiExportSession(id: string) {
+  return apiFetch<{ export: SessionExportPayload }>(`/sessions/${id}/export`);
+}
+
+export async function apiExportSessionToStore(id: string, payload: ExportSessionToStorePayload) {
+  return apiFetch<{ preset: StorePreset }>(`/sessions/${id}/export-to-store`, {
+    method: 'POST',
+    body: JSON.stringify(payload),
   });
 }
 
@@ -93,11 +120,68 @@ export async function apiAddMessage(sessionId: string, role: 'user' | 'assistant
   });
 }
 
+// ── Preset Store (/store/presets) ─────────────────────────
+export async function apiGetStorePresets(params?: {
+  search?: string;
+  genre?: string;
+  sortBy?: 'recent' | 'popular';
+}) {
+  const qs = new URLSearchParams();
+  if (params?.search?.trim()) qs.set('search', params.search.trim());
+  if (params?.genre?.trim() && params.genre !== 'Todos') qs.set('genre', params.genre.trim());
+  if (params?.sortBy) qs.set('sortBy', params.sortBy);
+  const query = qs.toString();
+  return apiFetch<{ presets: StorePreset[] }>(`/store/presets${query ? `?${query}` : ''}`, {
+    skipAuth: true,
+  });
+}
+
+export async function apiGetStorePreset(id: string) {
+  return apiFetch<{ preset: StorePreset }>(`/store/presets/${id}`, {
+    skipAuth: true,
+  });
+}
+
+export async function apiUseStorePreset(id: string, createSession = true) {
+  return apiFetch<{ preset: StorePreset; createdSession?: ChatSession }>(
+    `/store/presets/${id}/use?createSession=${createSession ? 'true' : 'false'}`,
+    {
+      method: 'POST',
+      skipAuth: !createSession,
+    }
+  );
+}
+
+export async function apiPublishStorePreset(payload: PublishStorePresetPayload) {
+  return apiFetch<{ preset: StorePreset }>('/store/presets', {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  });
+}
+
+export async function apiGetMyStorePresets() {
+  return apiFetch<{ presets: StorePreset[] }>('/store/presets/my');
+}
+
+export async function apiUpdateStorePreset(id: string, payload: UpdateStorePresetPayload) {
+  return apiFetch<{ preset: StorePreset }>(`/store/presets/${id}`, {
+    method: 'PATCH',
+    body: JSON.stringify(payload),
+  });
+}
+
+export async function apiDeleteStorePreset(id: string) {
+  return apiFetch<{ success: boolean }>(`/store/presets/${id}`, {
+    method: 'DELETE',
+  });
+}
+
 // ── Types ─────────────────────────────────────────────────
 export interface User {
   id: string;
   email: string;
   name: string;
+  createdAt?: string;
 }
 
 /** Serializable version of a chord segment (no complex objects) */
@@ -132,13 +216,64 @@ export interface ChatSession {
   createdAt: string;
   updatedAt: string;
   compositionData?: SerializedBlock[] | null;
-  messages?: { content: string; createdAt: string }[];
+  messages?: Message[];
 }
 
 export interface Message {
   id: string;
   role: string;
   content: string;
-  sessionId: string;
+  sessionId?: string;
   createdAt: string;
+}
+
+export interface SessionExportPayload {
+  sessionId: string;
+  title: string;
+  exportedAt: string;
+  configurationData: SerializedBlock[];
+}
+
+export interface StorePreset {
+  id: string;
+  title: string;
+  description?: string;
+  genre?: string;
+  tags?: string;
+  bpm?: number;
+  tonality?: string;
+  timeSignature?: string;
+  configurationData?: SerializedBlock[];
+  downloadsCount: number;
+  likesCount: number;
+  authorId: string;
+  authorName: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface ExportSessionToStorePayload {
+  title: string;
+  description?: string;
+  genre?: string;
+  tags?: string;
+  bpm?: number;
+  tonality?: string;
+  timeSignature?: string;
+}
+
+export interface PublishStorePresetPayload extends ExportSessionToStorePayload {
+  sessionId?: string;
+  configurationData?: SerializedBlock[];
+}
+
+export interface UpdateStorePresetPayload {
+  title?: string;
+  description?: string;
+  genre?: string;
+  tags?: string;
+  bpm?: number;
+  tonality?: string;
+  timeSignature?: string;
+  configurationData?: SerializedBlock[];
 }

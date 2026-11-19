@@ -1,8 +1,6 @@
 import { useState, useRef, useEffect } from "react";
 import { ALL_TONALITIES } from "../engine/TonalityAdapter";
-import { Plus, Settings2, Activity, Music, Mic2 } from "lucide-react";
-import { OrchestraArranger } from "./OrchestraArranger";
-import type { InstrumentType } from "../hooks/useStringEngine";
+import { Plus, Settings2, Activity, Music } from "lucide-react";
 
 export interface TimeSignature {
   numerator: number;
@@ -21,13 +19,7 @@ interface RecordControlsProps {
   setPreRecordTonality: (val: string) => void;
   preRecordTemperature: number;
   setPreRecordTemperature: (val: number) => void;
-  loadOrchestraInstrument: (id: string) => Promise<void>;
-  unloadOrchestraInstrument: (id: string) => void;
-  activeOrchestraInstruments: string[];
-  onArrangerOpenChange?: (isOpen: boolean) => void;
   onToggleLive?: () => void;
-  chordsInstrument?: InstrumentType | "orchestra";
-  setChordsInstrument?: (val: InstrumentType | "orchestra") => void;
 }
 
 const NUMERATOR_OPTIONS = [2, 3, 4, 6, 9];
@@ -45,22 +37,11 @@ export function RecordControls({
   setPreRecordTonality,
   preRecordTemperature,
   setPreRecordTemperature,
-  loadOrchestraInstrument,
-  unloadOrchestraInstrument,
-  activeOrchestraInstruments,
-  onArrangerOpenChange,
   onToggleLive,
 }: RecordControlsProps) {
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
-  const [isArrangerOpen, setIsArrangerOpen] = useState(false);
   const settingsRef = useRef<HTMLDivElement>(null);
-  const arrangerRef = useRef<HTMLDivElement>(null);
   const [customBpmStr, setCustomBpmStr] = useState<string>("");
-  const [loadingInstruments, setLoadingInstruments] = useState<string[]>([]);
-
-  useEffect(() => {
-    onArrangerOpenChange?.(isArrangerOpen);
-  }, [isArrangerOpen, onArrangerOpenChange]);
 
   useEffect(() => {
     if (preRecordBpm === "AUTO") {
@@ -75,25 +56,12 @@ export function RecordControls({
       if (settingsRef.current && !settingsRef.current.contains(e.target as Node)) {
         setIsSettingsOpen(false);
       }
-      if (arrangerRef.current && !arrangerRef.current.contains(e.target as Node)) {
-        setIsArrangerOpen(false);
-      }
     };
-    if (isSettingsOpen || isArrangerOpen) {
+    if (isSettingsOpen) {
       document.addEventListener("mousedown", handleClickOutside);
     }
     return () => document.removeEventListener("mousedown", handleClickOutside);
-  }, [isSettingsOpen, isArrangerOpen]);
-
-  const handleToggleInstrument = async (id: string) => {
-    if (activeOrchestraInstruments.includes(id)) {
-      unloadOrchestraInstrument(id);
-    } else {
-      setLoadingInstruments(prev => [...prev, id]);
-      await loadOrchestraInstrument(id);
-      setLoadingInstruments(prev => prev.filter(i => i !== id));
-    }
-  };
+  }, [isSettingsOpen]);
 
   return (
     <div className="w-full max-w-3xl px-4 flex flex-col items-center transition-all duration-500 mb-8 z-20">
@@ -102,7 +70,7 @@ export function RecordControls({
         <div className="flex justify-between items-center px-4 mb-2">
           <span className="text-[10px] text-white/40 flex items-center gap-1.5 font-mono uppercase tracking-wider">
             <svg className="w-3 h-3 text-white/30" fill="currentColor" viewBox="0 0 24 24"><path d="M13 10V3L4 14h7v7l9-11h-7z"/></svg>
-            Requiem Live Engine
+            Requiem Live Engine · Piano
           </span>
           <span className="text-[10px] text-white/40 flex items-center gap-1.5 font-mono uppercase tracking-wider">
             <span className={`w-1.5 h-1.5 rounded-full ${isLive ? 'bg-emerald-400 shadow-[0_0_8px_rgba(52,211,153,0.9)] animate-ping' : 'bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.8)] animate-pulse'}`} />
@@ -241,73 +209,35 @@ export function RecordControls({
           </div>
         )}
 
-        {/* Orchestra Arranger Popup */}
-        {isArrangerOpen && !isLive && (
-          <div 
-            ref={arrangerRef}
-            className="absolute bottom-full mb-3 left-0 sm:left-1/2 sm:-translate-x-1/2 w-[95vw] sm:w-[600px] flex flex-col items-center animate-fade-in origin-bottom z-50 rounded-t-full shadow-2xl"
-          >
-            <OrchestraArranger 
-              activeInstruments={activeOrchestraInstruments}
-              onToggleInstrument={handleToggleInstrument}
-              loadingInstruments={loadingInstruments}
-            />
-          </div>
-        )}
-
-        {/* Main Input Bar */}
+        {/* Unboxed Controls & Action Trigger */}
         <div 
           onClick={onToggleLive}
-          className={`
-            relative group flex items-center w-full backdrop-blur-sm cursor-pointer
-            py-2 px-3 sm:py-2.5 sm:px-4 transition-all duration-300
-            ${isLive ? 'shadow-[0_4px_30px_rgba(16,185,129,0.2)]' : ''}
-          `}
-          style={{
-            borderRadius: '20px',
-            border: '1px solid transparent',
-            backgroundImage: isLive 
-              ? 'linear-gradient(90deg, rgba(16,185,129,0.15) 0%, rgba(5,150,105,0.3) 100%), linear-gradient(135deg, rgba(16,185,129,0.5) 0%, transparent 40%)'
-              : 'linear-gradient(90deg, rgba(10, 10, 10, 0.61) 0%), linear-gradient(135deg, rgba(62, 62, 62, 0.57) 0%, transparent 40%)',
-            backgroundOrigin: 'border-box',
-            backgroundClip: 'padding-box, border-box',
-            boxShadow: 'inset 0px 0px 5px -2px rgba(242,242,242,0.16)',
-          }}
+          className="relative group flex items-center justify-between sm:justify-start gap-3 w-full py-2.5 px-2 sm:px-3 cursor-pointer transition-all duration-300"
         >
           {/* left controls */}
-          <div className="flex-shrink-0 flex items-center gap-2 mr-3 z-30">
+          <div className="flex-shrink-0 flex items-center gap-1.5 sm:gap-2 mr-1 z-30">
             {isLive ? (
-               <div className="w-10 h-10 sm:w-12 sm:h-12 flex items-center justify-center">
-                 <span className="w-3 h-3 rounded-full bg-emerald-400 animate-ping" />
+               <div className="w-9 h-9 sm:w-10 sm:h-10 flex items-center justify-center">
+                 <span className="w-2.5 h-2.5 rounded-full bg-emerald-400 animate-ping" />
                </div>
             ) : (
                <div className="flex items-center gap-1">
-                 {/* Botao Maestro / Arranjador */}
-                 <button
-                   type="button"
-                   onClick={(e) => {
-                     e.stopPropagation();
-                     setIsArrangerOpen(!isArrangerOpen);
-                     setIsSettingsOpen(false);
-                   }}
-                   className={`flex items-center justify-center w-10 h-10 sm:w-12 sm:h-12 bg-transparent transition-all duration-300 ${isArrangerOpen ? 'text-amber-400' : 'text-white/50 hover:text-white/80'}`}
-                   aria-label="Arranjo Orquestral"
-                 >
-                   <Mic2 className={`w-5 h-5 transition-transform duration-300 ${isArrangerOpen ? 'scale-110' : ''}`} />
-                 </button>
-                 
                  {/* Botao de Configuracoes */}
                  <button
                    type="button"
                    onClick={(e) => {
                      e.stopPropagation();
                      setIsSettingsOpen(!isSettingsOpen);
-                     setIsArrangerOpen(false);
                    }}
-                   className={`flex items-center justify-center w-10 h-10 sm:w-12 sm:h-12 bg-transparent transition-all duration-300 ${isSettingsOpen ? 'text-emerald-400' : 'text-white/50 hover:text-white/80'}`}
+                   className={`flex items-center justify-center w-9 h-9 sm:w-10 sm:h-10 rounded-full transition-all duration-300 ${
+                     isSettingsOpen 
+                       ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 shadow-[0_0_12px_rgba(16,185,129,0.25)]' 
+                       : 'text-white/40 hover:text-white/90 hover:bg-white/[0.06]'
+                   }`}
                    aria-label="Configuracoes Musicais"
+                   title="Métrica, BPM e Tonalidade"
                  >
-                   <Plus className={`w-5 h-5 transition-transform duration-300 ${isSettingsOpen ? 'rotate-45' : ''}`} />
+                   <Plus className={`w-4 h-4 sm:w-5 sm:h-5 transition-transform duration-300 ${isSettingsOpen ? 'rotate-45' : ''}`} />
                  </button>
                </div>
             )}
@@ -316,17 +246,17 @@ export function RecordControls({
             {!isLive && (
               <div className="flex items-center gap-1.5 hidden sm:flex">
                 {(preRecordTimeSignature.numerator !== 4 || preRecordTimeSignature.denominator !== 4) && (
-                  <span className="px-2 py-1 rounded-md bg-white border border-white text-[10px] font-mono font-semibold text-black">
+                  <span className="px-2 py-0.5 rounded-full bg-white/10 border border-white/15 text-[10px] font-mono font-medium text-white/90">
                     {preRecordTimeSignature.numerator}/{preRecordTimeSignature.denominator}
                   </span>
                 )}
                 {preRecordBpm !== "AUTO" && (
-                  <span className="px-2 py-1 rounded-md bg-white border border-white text-[10px] font-mono font-semibold text-black">
+                  <span className="px-2 py-0.5 rounded-full bg-white/10 border border-white/15 text-[10px] font-mono font-medium text-white/90">
                     {preRecordBpm} BPM
                   </span>
                 )}
                 {preRecordTonality !== "AUTO" && (
-                  <span className="px-2 py-1 rounded-md bg-white border border-white text-[10px] font-mono font-semibold text-black">
+                  <span className="px-2 py-0.5 rounded-full bg-white/10 border border-white/15 text-[10px] font-mono font-medium text-white/90">
                     Tom: {preRecordTonality}
                   </span>
                 )}
@@ -334,8 +264,14 @@ export function RecordControls({
             )}
           </div>
 
+          {/* Prompt Livre (Sem caixa no fundo) */}
           <div className="flex-1 flex items-center px-2">
-            <span className={`text-sm sm:text-base font-light transition-colors ${isLive ? 'text-white' : 'text-white/50 group-hover:text-white/80'}`}>
+            <span className={`flex items-center gap-2 text-sm sm:text-base font-light tracking-wide transition-all duration-300 ${
+              isLive ? 'text-white' : 'text-white/45 group-hover:text-white/90'
+            }`}>
+              {!isLive && (
+                <span className="w-1.5 h-1.5 rounded-full bg-white/30 group-hover:bg-emerald-400 group-hover:shadow-[0_0_8px_rgba(52,211,153,0.8)] transition-all duration-300" />
+              )}
               {isLive 
                 ? (currentNote ? `Ouvindo: ${currentNote} (${currentFrequency}Hz)` : 'Acompanhamento ao vivo ativo...') 
                 : 'Clique para iniciar o acompanhamento'}

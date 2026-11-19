@@ -66,10 +66,6 @@ const P_JUMP = 0.13;
 /** P(observado | esperado) pela distância em semitons (circular 0-6). Mais tolerante para mic ao vivo. */
 const EMISSION = [0.6, 0.2, 0.1, 0.05, 0.05, 0.05, 0.05];
 
-/** Confiança mínima para TROCAR de acorde por causa de um ataque. */
-const SWITCH_CONFIDENCE = 0.25;
-/** Margem antes da próxima nota esperada que o volante não ultrapassa (beats). */
-const FLYWHEEL_GUARD = 0.25;
 /** Ataques consecutivos coerentes com a previsao para entrar em modo autonomo. */
 const LOCK_HITS = 3;
 /** Erro maximo (beats) entre a posicao prevista e a ancorada para contar como acerto. */
@@ -139,7 +135,7 @@ export class ScoreFollower {
     this.anchorEvent = 0;
     this.anchorPos = 0;
     this.anchorTime = startTime;
-    this.lastOnsetTime = 0;
+    this.lastOnsetTime = startTime;
     this.chordIndex = this.chordAtPosition(0);
     this.confidence = 1;
     this.status = "tracking";
@@ -204,30 +200,50 @@ export class ScoreFollower {
     const obs = (((pc - this.transpose) % 12) + 12) % 12;
     const obsMidi = midi !== undefined ? midi - this.transpose : undefined;
 
+    // Filtro anti-rebote: descarta ataques duplicados da mesma nota em intervalo menor que 65ms
+    if (this.lastOnsetTime > 0 && t - this.lastOnsetTime < 65 && this.recentOnsets.length > 0) {
+      const last = this.recentOnsets[this.recentOnsets.length - 1];
+      if (last.pc === obs) {
+        return this.snapshot(t);
+      }
+    }
+
     // Registra histórico de notas para reconhecimento melódico relativo
     this.recentOnsets.push({ pc: obs, midi: obsMidi, t });
     if (this.recentOnsets.length > 5) this.recentOnsets.shift();
 
-    // ── 1. Predição (transição) ──
+    const predictedPos = this.anchorEvent >= 0 ? this.flywheelPosition(t) : -1;
+
+    // ── 1. Predição (transição HMM) ──
     const prev = this.alpha;
     const pred = new Float64Array(this.n);
     if (!this.started) {
       pred.set(prev);
     } else {
-      const elapsedBeats = (t - this.lastOnsetTime) / this.msPerBeat;
+      const elapsedBeats = Math.max(0.01, (t - this.lastOnsetTime) / this.msPerBeat);
       let mass = 0;
       for (let j = 0; j < this.n; j++) mass += prev[j];
+
+      // Enquanto estamos em tracking ativo, a probabilidade de salto aleatório é minúscula (0.005)
+      // para evitar que refrões repetidos roubem a posição do cantor.
+      const currentPJump = this.status === "tracking" ? 0.005 : P_JUMP;
+      const currentPNext = this.status === "tracking" ? 0.68 : P_NEXT;
+      const currentPStay = this.status === "tracking" ? 0.16 : P_STAY;
+      const currentPSkip1 = this.status === "tracking" ? 0.12 : P_SKIP1;
+      const currentPSkip2 = this.status === "tracking" ? 0.03 : P_SKIP2;
+
       for (let i = 0; i < this.n; i++) {
-        let p = P_STAY * prev[i];
-        if (i >= 1) p += P_NEXT * prev[i - 1] * this.timing(melody[i].start - melody[i - 1].start, elapsedBeats);
-        if (i >= 2) p += P_SKIP1 * prev[i - 2] * this.timing(melody[i].start - melody[i - 2].start, elapsedBeats);
-        if (i >= 3) p += P_SKIP2 * prev[i - 3] * this.timing(melody[i].start - melody[i - 3].start, elapsedBeats);
-        p += P_JUMP * this.entry[i] * mass;
+        let p = currentPStay * prev[i];
+        if (i >= 1) p += currentPNext * prev[i - 1] * this.timing(melody[i].start - melody[i - 1].start, elapsedBeats);
+        if (i >= 2) p += currentPSkip1 * prev[i - 2] * this.timing(melody[i].start - melody[i - 2].start, elapsedBeats);
+        if (i >= 3) p += currentPSkip2 * prev[i - 3] * this.timing(melody[i].start - melody[i - 3].start, elapsedBeats);
+        p += currentPJump * this.entry[i] * mass;
         pred[i] = p;
       }
 
-      // Reconhecimento instantâneo de saltos/voltas via N-Grams aprendidos do MIDI
-      if (this.score.signatures && this.recentOnsets.length >= 2) {
+      // N-grams aprendidos do MIDI: usados para recuperação de posição quando o follower
+      // está buscando (seeking) ou incerto, sem poluir o rastreamento linear normal.
+      if (this.score.signatures && this.recentOnsets.length >= 2 && this.status !== "tracking") {
         const len = this.recentOnsets.length;
         const prev1 = this.recentOnsets[len - 2];
         const bigramKey = `${prev1.pc}_${obs}`;
@@ -242,11 +258,11 @@ export class ScoreFollower {
 
         if (trigramHits.length > 0) {
           for (const idx of trigramHits) {
-            if (idx >= 0 && idx < this.n) pred[idx] += 0.45 / trigramHits.length;
+            if (idx >= 0 && idx < this.n) pred[idx] += 0.35 / trigramHits.length;
           }
         } else if (bigramHits.length > 0) {
           for (const idx of bigramHits) {
-            if (idx >= 0 && idx < this.n) pred[idx] += 0.25 / bigramHits.length;
+            if (idx >= 0 && idx < this.n) pred[idx] += 0.15 / bigramHits.length;
           }
         }
       }
@@ -285,44 +301,61 @@ export class ScoreFollower {
     this.alpha = pred;
     this.started = true;
     this.lastObservedMidi = obsMidi ?? null;
-    const predictedPos = this.anchorEvent >= 0 ? this.flywheelPosition(t) : -1;
     this.lastOnsetTime = t;
 
-    // ── 3. Decisão harmônica por marginalização ──
-    const chordMass = new Map<string, number>();
-    for (let i = 0; i < this.n; i++) {
-      const sym = this.score.chords[melody[i].chordIndex]?.symbol ?? "";
-      chordMass.set(sym, (chordMass.get(sym) ?? 0) + pred[i]);
-    }
-    let bestSym = "";
-    let bestMass = -1;
-    for (const [sym, m] of chordMass) {
-      if (m > bestMass) { bestMass = m; bestSym = sym; }
-    }
+    // ── 3. Decisão de Estado com Janela de Localidade ──
+    // Identifica o melhor candidato na vizinhança local (±1.5 compassos) e o melhor global
+    let localBest = -1;
+    let localBestScore = -1;
+    let globalBest = -1;
+    let globalBestScore = -1;
 
-    // Estado representativo: o mais provável entre os que têm esse acorde,
-    // com desempate pela proximidade da posição prevista.
-    let rep = -1;
-    let repScore = -1;
+    const localRadiusBeats = Math.max(3, this.score.beatsPerBar * 1.5);
+
     for (let i = 0; i < this.n; i++) {
-      if ((this.score.chords[melody[i].chordIndex]?.symbol ?? "") !== bestSym) continue;
-      let s = pred[i];
-      if (predictedPos >= 0) {
-        const dist = Math.abs(melody[i].start - predictedPos) / this.score.beatsPerBar;
-        s *= 1 + 0.5 * Math.exp(-dist);
+      const p = pred[i];
+      if (p > globalBestScore) {
+        globalBestScore = p;
+        globalBest = i;
       }
-      if (s > repScore) { repScore = s; rep = i; }
+
+      if (predictedPos >= 0) {
+        const distBeats = Math.abs(melody[i].start - predictedPos);
+        if (distBeats <= localRadiusBeats) {
+          // Atenuação gaussiana suave na vizinhança do volante
+          const localWeight = Math.exp(-0.5 * Math.pow(distBeats / (this.score.beatsPerBar * 0.75), 2));
+          const score = p * (1 + 2.5 * localWeight);
+          if (score > localBestScore) {
+            localBestScore = score;
+            localBest = i;
+          }
+        }
+      }
     }
 
-    const shouldCommit = this.chordIndex < 0 || bestMass >= SWITCH_CONFIDENCE;
-    this.confidence = bestMass;
+    // Se temos um candidato plausível na vizinhança local do volante, ELE PREVALECE!
+    // Isso garante que o acompanhamento nunca se perca durante a execução contínua.
+    let rep = localBest;
+    let isDistantCandidate = false;
 
-    if (rep >= 0 && shouldCommit) {
+    if (rep < 0 || (this.status !== "tracking" && globalBestScore > localBestScore * 2.5)) {
+      rep = globalBest;
+      if (predictedPos >= 0 && rep >= 0) {
+        const distBeats = Math.abs(melody[rep].start - predictedPos);
+        if (distBeats > this.score.beatsPerBar * 1.5) {
+          isDistantCandidate = true;
+        }
+      }
+    }
+
+    if (rep >= 0) {
       const newPos = this.pickOnset(rep, predictedPos);
-      const isJump = predictedPos >= 0 && Math.abs(newPos - predictedPos) > this.score.beatsPerBar;
+      const isJump = predictedPos >= 0 && (isDistantCandidate || Math.abs(newPos - predictedPos) > this.score.beatsPerBar * 1.8);
 
       if (isJump) {
-        // Mudança de trecho detectada: segura a nota atual no pedal imediatamente
+        // HISTERESE DE SALTO: NUNCA salta imediatamente na primeira nota fora do trecho!
+        // Segura a posição atual no pedal e exige 2 notas consecutivas coerentes
+        // no trecho de destino antes de reposicionar a música.
         this.status = "seeking";
         this.hits = 0;
         this.locked = false;
@@ -332,37 +365,31 @@ export class ScoreFollower {
           this.pendingJumpPos = newPos;
           this.pendingJumpTime = t;
           this.pendingJumpHits = 1;
-
-          // Se a nota tiver alta probabilidade harmônica, salta imediatamente
-          if (bestMass >= 0.45) {
-            this.updateTempo(rep, t);
-            this.anchorEvent = rep;
-            this.anchorPos = newPos;
-            this.anchorTime = t;
-            this.chordIndex = this.chordAtPosition(this.anchorPos);
-            this.status = "tracking";
-            this.pendingJumpEvent = -1;
-            this.pendingJumpPos = -1;
-            this.pendingJumpHits = 0;
-          }
+          // Mantém a ancoragem atual; não teletransporta
         } else {
           const elapsedBeats = (t - this.pendingJumpTime) / this.msPerBeat;
           const expectedJumpPos = this.pendingJumpPos + elapsedBeats;
           const consistency = Math.abs(newPos - expectedJumpPos);
+          const isSequentialJump = rep >= this.pendingJumpEvent && rep <= this.pendingJumpEvent + 3;
 
-          if (consistency <= Math.max(3, this.score.beatsPerBar) || bestMass >= 0.35 || this.pendingJumpHits >= 2) {
-            // Confirmado! Vai para o novo trecho imediatamente
-            this.updateTempo(rep, t);
-            this.anchorEvent = rep;
-            this.anchorPos = newPos;
-            this.anchorTime = t;
-            this.chordIndex = this.chordAtPosition(this.anchorPos);
-            this.status = "tracking";
-            this.pendingJumpEvent = -1;
-            this.pendingJumpPos = -1;
-            this.pendingJumpHits = 0;
+          if (consistency <= Math.max(2.5, this.score.beatsPerBar) || isSequentialJump) {
+            this.pendingJumpHits++;
+            if (this.pendingJumpHits >= 3) {
+              // CERTEZA TOTAL: 3 notas consecutivas confirmadas no novo trecho (ex: início do Refrão).
+              // Transiciona suavemente a partitura para a nova seção:
+              this.updateTempo(rep, t);
+              this.anchorEvent = rep;
+              this.anchorPos = newPos;
+              this.anchorTime = t;
+              this.chordIndex = this.chordAtPosition(this.anchorPos);
+              this.status = "tracking";
+              this.locked = true;
+              this.pendingJumpEvent = -1;
+              this.pendingJumpPos = -1;
+              this.pendingJumpHits = 0;
+            }
           } else if (Math.abs(newPos - predictedPos) <= this.score.beatsPerBar) {
-            // Falso salto: cantor continua no trecho atual
+            // Falso alarme: o músico continua no trecho atual
             this.pendingJumpEvent = -1;
             this.pendingJumpPos = -1;
             this.pendingJumpHits = 0;
@@ -371,18 +398,18 @@ export class ScoreFollower {
             this.pendingJumpEvent = rep;
             this.pendingJumpPos = newPos;
             this.pendingJumpTime = t;
-            this.pendingJumpHits++;
+            this.pendingJumpHits = 1;
           }
         }
       } else {
-        // Continuação no mesmo trecho: segue tocando os próximos acordes no BPM certo
+        // Continuação regular no mesmo trecho: segue o andamento no BPM correto
         this.pendingJumpEvent = -1;
         this.pendingJumpPos = -1;
         this.pendingJumpHits = 0;
 
         const phaseDiff = newPos - predictedPos;
         if (predictedPos >= 0 && Math.abs(phaseDiff) <= LOCK_TOLERANCE) {
-          // Ajuste suave de fase para manter o andamento estável com o cantor
+          // Ajuste suave de fase (15%) para acomodar rubato sem sobressaltos
           this.anchorPos = predictedPos + 0.15 * phaseDiff;
           this.anchorTime = t;
           this.hits++;
@@ -399,6 +426,7 @@ export class ScoreFollower {
         this.chordIndex = this.chordAtPosition(this.anchorPos);
         this.status = "tracking";
       }
+      this.confidence = Math.max(localBestScore, globalBestScore);
     } else {
       this.misses++;
       if (this.misses >= UNLOCK_MISSES) {
@@ -463,14 +491,10 @@ export class ScoreFollower {
   }
 
   private flywheelPosition(t: number): number {
-    const { totalBeats, melody } = this.score;
-    let pos = this.anchorPos + (t - this.anchorTime) / this.msPerBeat;
-    if (this.anchorEvent >= 0 && this.anchorEvent < melody.length - 1 && !this.locked) {
-      const nextStart = melody[this.anchorEvent + 1].start;
-      if (pos > nextStart - FLYWHEEL_GUARD) {
-        pos = nextStart - FLYWHEEL_GUARD;
-      }
-    }
+    const { totalBeats } = this.score;
+    // Fluxo musical contínuo: o acompanhamento nunca congela ou para no meio da canção.
+    // Ele mantém o andamento e o ritmo como um pianista profissional tocando com a banda.
+    const pos = this.anchorPos + (t - this.anchorTime) / this.msPerBeat;
     return Math.min(pos, totalBeats);
   }
 
@@ -492,15 +516,17 @@ export class ScoreFollower {
   private updateTempo(rep: number, t: number) {
     if (this.anchorEvent < 0) return;
     const step = rep - this.anchorEvent;
-    if (step < 1 || step > 4) return;
+    // Atualização de tempo apenas em passos consecutivos graduais (1 ou 2 eventos)
+    if (step < 1 || step > 2) return;
     const beats = this.score.melody[rep].start - this.anchorPos;
     const dt = t - this.anchorTime;
     if (beats <= 0.5 || dt <= 0) return;
     const sample = dt / beats;
-    // Rejeita amostras absurdas (respirações longas, erros de rastreio)
-    if (sample < this.msPerBeat * 0.5 || sample > this.msPerBeat * 2) return;
-    const next = 0.7 * this.msPerBeat + 0.3 * sample;
-    this.msPerBeat = Math.min(this.nominalMsPerBeat * 2.5, Math.max(this.nominalMsPerBeat * 0.4, next));
+    // Rejeita amostras extremas (respirações longas, notas seguradas ou ruídos)
+    if (sample < this.nominalMsPerBeat * 0.6 || sample > this.nominalMsPerBeat * 1.6) return;
+    // Média móvel suave (15% nova amostra, 85% histórico)
+    const next = 0.85 * this.msPerBeat + 0.15 * sample;
+    this.msPerBeat = Math.min(this.nominalMsPerBeat * 1.5, Math.max(this.nominalMsPerBeat * 0.65, next));
   }
 
   private chordAtPosition(pos: number): number {

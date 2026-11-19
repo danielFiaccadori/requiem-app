@@ -75,3 +75,20 @@ export function detectMidiKey(midi: MinimalMidi): KeyDetectionResult | null {
 
   return { key: best.key, confidence: best.score, source: "analysis" };
 }
+
+/**
+ * Estima a tonalidade em tempo real a partir de um histograma de 12 pitch classes acumuladas.
+ * Útil para acompanhamento livre quando o tom está em 'AUTO'.
+ */
+export function detectPitchClassesKey(hist: number[]): KeyDetectionResult | null {
+  if (!hist || hist.length < 12 || hist.every(v => v === 0)) return null;
+
+  const candidates: { key: string; score: number }[] = [];
+  for (let tonic = 0; tonic < 12; tonic++) {
+    const rotated = hist.map((_, i) => hist[(i + tonic) % 12]);
+    candidates.push({ key: MAJOR_NAMES[tonic], score: pearson(rotated, MAJOR_PROFILE) });
+    candidates.push({ key: MINOR_NAMES[tonic], score: pearson(rotated, MINOR_PROFILE) });
+  }
+  candidates.sort((a, b) => b.score - a.score);
+  return { key: candidates[0].key, confidence: candidates[0].score, source: "analysis" };
+}

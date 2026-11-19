@@ -12,7 +12,8 @@
 // ─────────────────────────────────────────────────────────
 
 import type { DetectedNote } from "../hooks/usePitchDetector";
-import { chordToRoman, getChordPitchClasses, isChordDiatonic, getTonalityOffset } from "./TonalityAdapter";
+import { chordToRoman, getChordPitchClasses, isChordDiatonic, getTonalityOffset, normalizeProgressionToC } from "./TonalityAdapter";
+import type { SongHarmonicGrammar } from "./ScoreBuilder";
 
 // ─────────────────────────────────────────────────────────
 //  1. Tipos públicos
@@ -92,10 +93,9 @@ const ACOUSTIC_WEIGHT = 1.0;            // Mantido
 const DEFAULT_TEMPERATURE = 0.1;        // Quase zero para evitar escolhas aleatórias e erráticas
 const NEURAL_OVERRIDE_THRESHOLD = 0.25;
 const WEIGHT_IN_CHORD = 2.0;
-const WEIGHT_ROOT_BONUS = 1.5;
 const WEIGHT_OUT_PENALTY = 0.5;
-const WEIGHT_STRONG_BEAT = 3.0;
-const WEIGHT_WEAK_BEAT = 0.5;
+const WEIGHT_STRONG_BEAT = 1.5;
+const WEIGHT_WEAK_BEAT = 1.0;
 const BEAT_MARGIN_SEC = 0.15;
 const REGISTER_LOW_THRESHOLD = 48;
 const REGISTER_HIGH_THRESHOLD = 72;
@@ -331,12 +331,19 @@ function computeNoteScore(
 ): number {
   let score = 0;
   const rootNote = chordNotes[0];
+  const thirdNote = chordNotes.length > 1 ? chordNotes[1] : -1;
+  const fifthNote = chordNotes.length > 2 ? chordNotes[2] : -1;
+  const seventhNote = chordNotes.length > 3 ? chordNotes[3] : -1;
   const outPenalty = isHighDensity ? WEIGHT_OUT_PENALTY * ORNAMENT_PENALTY_MULT : WEIGHT_OUT_PENALTY;
 
   for (const note of playedNotes) {
     const pc = Math.round(note.pitch) % 12;
     const isChordTone = chordNotes.includes(pc);
     const isRoot = pc === rootNote;
+    const isThird = pc === thirdNote;
+    const isFifth = pc === fifthNote;
+    const isSeventh = pc === seventhNote;
+
     const relTime = note.startTime - windowStart;
     const beatPhase = secondsPerBeat > 0 ? (relTime % secondsPerBeat) / secondsPerBeat : 0;
     const isStrong = beatPhase < BEAT_MARGIN_SEC || beatPhase > 1 - BEAT_MARGIN_SEC;
@@ -345,7 +352,17 @@ function computeNoteScore(
     let regMod = 1.0;
     if (note.pitch < REGISTER_LOW_THRESHOLD && isRoot) regMod = REGISTER_BONUS;
     if (note.pitch > REGISTER_HIGH_THRESHOLD && !isChordTone) regMod = REGISTER_PENALTY;
-    const baseVal = isChordTone ? WEIGHT_IN_CHORD + (isRoot ? WEIGHT_ROOT_BONUS : 0) : -outPenalty;
+
+    // Em harmonia musical funcional, a terça e a sétima são as notas mais expressivas da harmonia.
+    // A nota melódica executada NÃO deve forçar o acorde a ter essa nota como fundamental!
+    let baseVal = -outPenalty;
+    if (isChordTone) {
+      baseVal = WEIGHT_IN_CHORD;
+      if (isThird) baseVal += 0.8;        // Terça: define se o acorde é maior ou menor
+      else if (isSeventh) baseVal += 0.7; // Sétima: confere direção harmônica e tensão
+      else if (isFifth) baseVal += 0.4;   // Quinta: estabilidade e sonoridade aberta
+      else if (isRoot) baseVal += 0.3;    // Fundamental: base tonal equilibrada
+    }
     score += baseVal * rhythmicWeight * ampWeight * regMod;
   }
   return score;
@@ -356,13 +373,27 @@ function computeNoteScore(
 // ─────────────────────────────────────────────────────────
 
 function sampleWithTemperature(candidates: string[], scores: number[], temp: number): string {
-  if (temp <= 0) {
+  if (candidates.length === 0) return "C";
+  if (temp <= 0.05) {
     let maxI = 0;
     for (let i = 1; i < scores.length; i++) if (scores[i] > scores[maxI]) maxI = i;
     return candidates[maxI];
   }
+
   const maxScore = Math.max(...scores);
-  const exps = scores.map(s => Math.exp((s - maxScore) / temp));
+  const minScore = Math.min(...scores);
+  const range = maxScore - minScore;
+
+  if (range < 1e-4) return candidates[0];
+
+  // Normalização de logits para escala adaptativa (~0 a 3.5).
+  // Isso resolve matematicamente o problema da temperatura não ter efeito:
+  // Agora temperaturas baixas (0.1) são firmes/tradicionais e altas (1.2+)
+  // abrem espaço real para opções inovadoras e ricas.
+  const scaleFactor = Math.max(1.0, range / 3.5);
+  const scaledScores = scores.map(s => (s - maxScore) / scaleFactor);
+
+  const exps = scaledScores.map(s => Math.exp(s / Math.max(0.1, temp)));
   const sumExps = exps.reduce((a, b) => a + b, 0);
   let rand = Math.random() * sumExps;
   for (let i = 0; i < exps.length; i++) {
@@ -378,10 +409,21 @@ export function determineNextChord(
   windowStart: number,
   secondsPerBeat: number,
   temperature: number = DEFAULT_TEMPERATURE,
-  tonality: string = "AUTO"
-): { chord: string; velocity: number } {
-  const currentChord = chordHistory.length > 0 ? chordHistory[chordHistory.length - 1] : "C";
-  if (playedNotes.length === 0) return { chord: currentChord, velocity: 0.7 };
+  tonality: string = "AUTO",
+  songGrammar?: SongHarmonicGrammar | null,
+  songPositionIndex: number = -1
+): { chord: string; velocity: number; nextSongChordIndex?: number } {
+  const currentChord = chordHistory.length > 0 
+    ? chordHistory[chordHistory.length - 1] 
+    : (songGrammar?.initialChord || "C");
+
+  if (playedNotes.length === 0) {
+    return { 
+      chord: currentChord, 
+      velocity: 0.7, 
+      nextSongChordIndex: songPositionIndex >= 0 ? songPositionIndex : 0 
+    };
+  }
 
   const currentNode = HARMONY_GRAPH[currentChord];
   
@@ -391,7 +433,24 @@ export function determineNextChord(
     melodyChroma[pc] = 1;
   }
 
-  const neuralProbs = predict(chordHistory, melodyChroma);
+  // Se uma tonalidade estiver ativa, transpõe o histórico e o chroma para o Local Space (C Major)
+  // para que o modelo LSTM treinado funcione perfeitamente em QUALQUER tom (D, G, E, Bb, etc.)
+  let neuralHistory = chordHistory;
+  let neuralMelodyChroma = melodyChroma;
+  let tonalityOffset = 0;
+
+  if (tonality !== "AUTO" && tonality) {
+    tonalityOffset = getTonalityOffset(tonality);
+    neuralHistory = normalizeProgressionToC(chordHistory, tonality);
+    if (tonalityOffset !== 0) {
+      neuralMelodyChroma = new Array(12).fill(0);
+      for (let i = 0; i < 12; i++) {
+        neuralMelodyChroma[(i - tonalityOffset + 12) % 12] = melodyChroma[i];
+      }
+    }
+  }
+
+  const neuralProbs = predict(neuralHistory, neuralMelodyChroma);
 
   const density = playedNotes.length;
   const isHighDensity = density > DENSITY_THRESHOLD;
@@ -402,7 +461,7 @@ export function determineNextChord(
   }
   const avgAmplitude = Math.max(0.2, sumAmp / density);
 
-  // ── Cadence / Contour Heuristic ──
+  // ── Heurística de Contorno e Cadência ──
   let isDescendingToTonic = false;
   let isDescendingToDominant = false;
   
@@ -410,23 +469,17 @@ export function determineNextChord(
     const recentPitches = playedNotes.map(n => n.pitch);
     const startPitch = recentPitches[0];
     const endPitch = recentPitches[density - 1];
-    
-    // Verifica se a melodia caiu de forma geral (pelo menos 1 tom) na janela de captura
     const isDescending = startPitch - endPitch >= 2;
     
     if (isDescending) {
-      const tonalityOffset = getTonalityOffset(tonality);
       const currentPc = Math.round(endPitch) % 12;
-      
       if (currentPc === tonalityOffset) {
-        // Melodia desceu e repousou na tônica (Grau I)
         isDescendingToTonic = true;
       } else if (
-        currentPc === (tonalityOffset + 7) % 12 || // Dominante (V)
-        currentPc === (tonalityOffset + 2) % 12 || // Supertônica (ii)
-        currentPc === (tonalityOffset + 11) % 12   // Sensível (vii°)
+        currentPc === (tonalityOffset + 7) % 12 ||
+        currentPc === (tonalityOffset + 2) % 12 ||
+        currentPc === (tonalityOffset + 11) % 12
       ) {
-        // Melodia desceu e repousou em zona de tensão que pede cadência
         isDescendingToDominant = true;
       }
     }
@@ -435,51 +488,109 @@ export function determineNextChord(
   const candidates: string[] = [];
   const scores: number[] = [];
 
-  for (const candidateName of Object.keys(HARMONY_GRAPH)) {
-    const idx = _vocabMap.get(candidateName) ?? -1;
+  // Se houver gramática da música aprendida do MIDI, o espaço de busca foca nos acordes da obra!
+  const hasSongGrammar = Boolean(songGrammar && songGrammar.vocabulary && songGrammar.vocabulary.length > 0);
+  const pool = hasSongGrammar
+    ? (temperature > 0.65 
+        ? Array.from(new Set([...songGrammar!.vocabulary, ...Object.keys(HARMONY_GRAPH)]))
+        : songGrammar!.vocabulary)
+    : Object.keys(HARMONY_GRAPH);
+
+  for (const candidateName of pool) {
+    // Busca probabilidade neural mapeando o candidato para o Local Space
+    let localCandidate = candidateName;
+    if (tonality !== "AUTO" && tonality) {
+      localCandidate = normalizeProgressionToC([candidateName], tonality)[0] || candidateName;
+    }
+    const idx = _vocabMap.get(localCandidate) ?? -1;
     let neuralProb = idx >= 0 ? neuralProbs[idx] : 0;
 
     const isAllowedGraph = currentNode?.allowedTransitions.includes(candidateName) ?? false;
     const isAllowedNeural = neuralProb > NEURAL_OVERRIDE_THRESHOLD;
+    const isSongChord = hasSongGrammar && songGrammar!.vocabulary.includes(candidateName);
 
-    if (!isAllowedGraph && !isAllowedNeural) continue;
+    // Se NÃO tiver gramática, aplica a regra padrão do grafo ou neural
+    if (!hasSongGrammar && !isAllowedGraph && !isAllowedNeural) continue;
     if (hasLeap && (candidateName.includes("7") || candidateName.includes("dim"))) neuralProb *= TENSION_BONUS;
 
     const chordNotes = getChordPitchClasses(candidateName);
 
-    // CORREÇÃO CRÍTICA: score acústico dividido pela densidade
+    // Score acústico equilibrado pela densidade
     const acousticScoreRaw = computeNoteScore(chordNotes, playedNotes, windowStart, secondsPerBeat, isHighDensity, avgAmplitude);
     const acousticScore = acousticScoreRaw / Math.max(1, density);
 
     let finalScore = ACOUSTIC_WEIGHT * acousticScore + NEURAL_WEIGHT * neuralProb;
 
-    // ── Scale Masking (Filtro de Campo Harmônico) ──
+    // ── Condicionamento com o DNA Harmônico do MIDI (Song Grammar) ──
+    if (hasSongGrammar && songGrammar) {
+      // 1. Transição aprendida do MIDI: P(candidato | acordeAtual)
+      const transProb = songGrammar.transitionMatrix[currentChord]?.[candidateName] ?? 0;
+      if (transProb > 0) {
+        finalScore += transProb * 4.5; // Forte bônus de transição estrutural da música
+      }
+
+      // 2. Expectativa sequencial com base na linha do tempo da música
+      if (songPositionIndex >= 0 && songGrammar.sequence.length > 0) {
+        const nextIdx = (songPositionIndex + 1) % songGrammar.sequence.length;
+        const nextExpectedChord = songGrammar.sequence[nextIdx];
+        if (candidateName === nextExpectedChord) {
+          finalScore += 3.5; // Avanço harmônico natural da canção
+        }
+
+        const currentExpectedChord = songGrammar.sequence[songPositionIndex % songGrammar.sequence.length];
+        if (candidateName === currentExpectedChord) {
+          finalScore += 1.8; // Estabilidade no acorde atual enquanto canta notas da mesma harmonia
+        }
+      }
+
+      // 3. Vocabulário da música
+      if (isSongChord) {
+        finalScore += 2.0;
+      } else {
+        finalScore -= 6.0; // Desestimula acordes alienígenas à canção
+      }
+    }
+
+    // ── Filtro Funcional de Campo Harmônico (Scale Masking) ──
     if (tonality !== "AUTO" && tonality) {
       const roman = chordToRoman(candidateName, tonality);
       const baseRoman = roman.replace(/[^IVvxi]/g, '');
 
       if (isChordDiatonic(candidateName, tonality)) {
-        // Forte bônus se pertence ao campo harmônico e a temperatura for baixa
-        const scaleBias = Math.max(1.0, 3.0 / Math.max(0.1, temperature));
+        // Forte bônus tonal para acordes diatônicos
+        const scaleBias = Math.max(1.3, 2.4 / Math.max(0.2, temperature));
         finalScore *= scaleBias;
+
+        // Bônus funcional para cadências no tom (I, IV, V, ii)
+        if (baseRoman === "I" || baseRoman === "i") finalScore += 1.2;
+        else if (baseRoman === "IV" || baseRoman === "iv" || baseRoman === "ii") finalScore += 0.8;
+        else if (baseRoman === "V" || baseRoman === "v") finalScore += 1.0;
       } else {
-        // Penalidade para acordes fora do tom
-        const penalty = Math.min(1.0, temperature / 2.0); 
-        finalScore *= penalty;
+        // Acorde fora do tom: se fizer parte do arranjo do MIDI, respeita!
+        if (isSongChord) {
+          finalScore *= 1.2; // O arranjo escolheu esse acorde expressivo intencionalmente
+        } else {
+          const penalty = Math.min(0.7, 0.15 + (temperature * 0.35));
+          finalScore *= penalty;
+        }
+      }
+
+      // ── Anti-Estagnação Harmônica ──
+      if (chordHistory.length >= 2) {
+        const last1 = chordHistory[chordHistory.length - 1];
+        const last2 = chordHistory[chordHistory.length - 2];
+        if (candidateName === last1 && last1 === last2) {
+          finalScore *= 0.55;
+        } else if (candidateName === last1) {
+          finalScore *= 0.88;
+        }
       }
 
       // ── Bônus de Contorno (Cadências) ──
-      if (isDescendingToTonic) {
-        // Se a melodia desceu para repousar na tônica, forçamos o acorde I ou i
-        if (baseRoman === "I" || baseRoman === "i") {
-          finalScore *= 5.0; // Bônus gigante de conclusão de frase
-        }
-      } else if (isDescendingToDominant) {
-        // Se desceu preparando para concluir (parou na quinta, segunda ou sensível),
-        // forçamos o acorde de Dominante (V) ou Sensível (vii)
-        if (baseRoman === "V" || baseRoman === "v" || baseRoman === "vii") {
-          finalScore *= 4.0; // Bônus de tensão preparatória
-        }
+      if (isDescendingToTonic && (baseRoman === "I" || baseRoman === "i")) {
+        finalScore += 3.0;
+      } else if (isDescendingToDominant && (baseRoman === "V" || baseRoman === "v" || baseRoman === "vii")) {
+        finalScore += 2.5;
       }
     }
 
@@ -488,7 +599,33 @@ export function determineNextChord(
   }
 
   const bestChord = candidates.length > 0 ? sampleWithTemperature(candidates, scores, temperature) : currentChord;
-  return { chord: bestChord, velocity: avgAmplitude };
+
+  let nextSongChordIndex = songPositionIndex;
+  if (hasSongGrammar && songGrammar && songGrammar.sequence.length > 0) {
+    if (songPositionIndex >= 0) {
+      const nextExpected = (songPositionIndex + 1) % songGrammar.sequence.length;
+      if (songGrammar.sequence[nextExpected] === bestChord) {
+        nextSongChordIndex = nextExpected;
+      } else if (songGrammar.sequence[songPositionIndex % songGrammar.sequence.length] === bestChord) {
+        nextSongChordIndex = songPositionIndex;
+      } else {
+        const seq = songGrammar.sequence;
+        let found = -1;
+        for (let offset = 1; offset < seq.length; offset++) {
+          const idx = (songPositionIndex + offset) % seq.length;
+          if (seq[idx] === bestChord) {
+            found = idx;
+            break;
+          }
+        }
+        nextSongChordIndex = found !== -1 ? found : seq.indexOf(bestChord);
+      }
+    } else {
+      nextSongChordIndex = songGrammar.sequence.indexOf(bestChord);
+    }
+  }
+
+  return { chord: bestChord, velocity: avgAmplitude, nextSongChordIndex };
 }
 
 // ─────────────────────────────────────────────────────────
